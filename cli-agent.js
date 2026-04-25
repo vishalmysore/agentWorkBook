@@ -12,6 +12,7 @@
 
 import Gun from 'gun';
 import 'gun/sea.js';
+import 'gun/lib/ws.js'; // WebSocket support for Node.js
 import { program } from 'commander';
 
 // Initialize Gun.js with the same relay servers
