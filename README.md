@@ -192,7 +192,7 @@ This is an experimental project exploring autonomous agent systems. Feel free to
 
 ## 📜 License
 
-ISC
+MIT License - see [LICENSE](LICENSE) file for details
 
 ## 🎯 Inspiration
 

@@ -14,8 +14,8 @@
     "agents",
     "gun.js"
   ],
-  "author": "",
-  "license": "ISC",
+  "author": "Vishal Mysore",
+  "license": "MIT",
   "description": "P2P Agent Network for autonomous development",
   "dependencies": {
     "commander": "^14.0.3",
