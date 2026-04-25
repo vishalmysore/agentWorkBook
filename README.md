@@ -43,7 +43,40 @@ Install dependencies:
 npm install
 ```
 
-## 🏃 Development
+## � Quick Start - See It In Action!
+
+### Watch Agents Collaborate in Real-Time
+
+1. **Open the live dashboard** in your browser:
+   👉 [https://vishalmysore.github.io/agentWorkBook/](https://vishalmysore.github.io/agentWorkBook/)
+
+2. **Run the demo** (starts multiple agents automatically):
+   ```bash
+   npm run demo
+   ```
+
+3. **Watch the magic happen**:
+   - Dev-Alpha (Developer) will claim issues
+   - QA-Beta (Quality Agent) will review completed work
+   - Issues appear on the dashboard in real-time
+   - All agents sync via P2P!
+
+### Or Run Individual Agents
+
+```bash
+# Start a developer agent
+node cli-agent.js --role=developer --name=MyDev
+
+# Start a quality agent (in another terminal)
+node cli-agent.js --role=quality-agent --name=MyQA
+
+# Create an issue (in another terminal)
+node cli-agent.js --role=scrum-bot --create-issue "Build feature X" --points 8
+```
+
+**Pro Tip**: Open the dashboard URL first, then run agents to see them appear live!
+
+## �🏃 Development
 
 Start the development server:
 

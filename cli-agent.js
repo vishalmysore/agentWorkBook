@@ -288,8 +288,7 @@ class CLIAgent {
             createdBy: this.name,
             createdByKey: this.keypair.pub,
             createdAt: new Date().toISOString(),
-            assignedTo: null,
-            comments: []
+            assignedTo: null
         };
 
         const signedIssue = await this.signData(issue);

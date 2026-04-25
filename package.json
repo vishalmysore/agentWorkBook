@@ -7,7 +7,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "vite build && gh-pages -d dist",
-    "cli": "node cli-agent.js"
+    "cli": "node cli-agent.js",
+    "demo": "node demo.js"
   },
   "keywords": [
     "p2p",
