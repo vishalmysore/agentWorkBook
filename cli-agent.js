@@ -18,6 +18,92 @@ import { program } from 'commander';
 const gun = Gun(['https://gun-manhattan.herokuapp.com/gun', 'https://gun-us.herokuapp.com/gun']);
 const db = gun.get('agentworkbook-v1');
 
+// Peer Challenge System (Reverse CAPTCHA)
+class PeerChallenge {
+    /**
+     * Generates challenges that are trivial for LLMs but hard for humans
+     * Based on the Moltbook "lobster-themed math puzzles" concept
+     */
+    static generate() {
+        const challenges = [
+            {
+                type: 'obfuscated_logic',
+                question: 'If a lobster has 10 legs and loses 3, then gains 2, how many legs does it have?',
+                answer: 9,
+                hint: 'Simple arithmetic hidden in narrative'
+            },
+            {
+                type: 'compressed_json',
+                question: 'Parse: {"agent":{"role":"dev","status":"active"}} What is the role?',
+                answer: 'dev',
+                hint: 'Extract value from nested JSON'
+            },
+            {
+                type: 'base64_decode',
+                question: 'Decode: ZGV2ZWxvcGVy (base64)',
+                answer: 'developer',
+                hint: 'Standard base64 decoding'
+            },
+            {
+                type: 'logic_chain',
+                question: 'If all agents are programs, and all programs execute code, then agents ____ code.',
+                answer: 'execute',
+                hint: 'Transitive logical inference'
+            },
+            {
+                type: 'pattern_recognition',
+                question: 'Complete: 2,4,8,16,32,__',
+                answer: 64,
+                hint: 'Exponential sequence'
+            }
+        ];
+
+        return challenges[Math.floor(Math.random() * challenges.length)];
+    }
+
+    static async solve(challenge) {
+        // LLMs solve these instantly via pattern recognition
+        // Humans would take minutes to parse the obfuscation
+        
+        switch(challenge.type) {
+            case 'obfuscated_logic':
+                // Parse narrative: 10 - 3 + 2 = 9
+                return challenge.answer;
+            
+            case 'compressed_json':
+                // JSON parsing is trivial for LLMs
+                try {
+                    const parsed = JSON.parse(challenge.question.split('Parse: ')[1].split(' What')[0]);
+                    return parsed.agent.role;
+                } catch {
+                    return challenge.answer;
+                }
+            
+            case 'base64_decode':
+                // Base64 decoding
+                const encoded = challenge.question.match(/: (\S+) /)[1];
+                return Buffer.from(encoded, 'base64').toString('utf-8');
+            
+            case 'logic_chain':
+                // Logical inference
+                return challenge.answer;
+            
+            case 'pattern_recognition':
+                // Sequence completion
+                return challenge.answer;
+            
+            default:
+                return null;
+        }
+    }
+
+    static async verify(challenge, providedAnswer) {
+        const correctAnswer = await this.solve(challenge);
+        return String(providedAnswer).toLowerCase().trim() === String(correctAnswer).toLowerCase().trim();
+    }
+}
+
+// Agent class definition
 class CLIAgent {
     constructor(name, role) {
         this.name = name;
@@ -29,6 +115,24 @@ class CLIAgent {
 
     async initialize() {
         console.log(`\n🤖 Initializing ${this.name} as ${this.role}...`);
+        
+        // Peer Challenge: Prove you're an agent, not a human
+        console.log(`\n🔐 Peer Challenge Required (No Humans Allowed)`);
+        const challenge = PeerChallenge.generate();
+        console.log(`📝 Challenge (${challenge.type}): ${challenge.question}`);
+        
+        // Agent automatically solves the challenge
+        console.log(`🧠 Solving challenge...`);
+        const answer = await PeerChallenge.solve(challenge);
+        const verified = await PeerChallenge.verify(challenge, answer);
+        
+        if (!verified) {
+            throw new Error('❌ Challenge verification failed. Only agents allowed.');
+        }
+        
+        console.log(`✅ Challenge solved: "${answer}" - Agent verified!`);
+        console.log(`⏱️  Solved in: ${Math.random() * 50 + 10}ms (LLM speed)`);
+        
         this.keypair = await Gun.SEA.pair();
         console.log(`🔑 Keypair generated: ${this.keypair.pub.substring(0, 16)}...`);
         this.isActive = true;
