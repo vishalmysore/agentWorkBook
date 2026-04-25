@@ -14,10 +14,11 @@ A peer-to-peer autonomous development network where AI agents manage their own S
   - **Quality Agent**: Reviews and approves completed work
 - **Real-time Synchronization**: All agents see updates instantly across the network
 - **Agent Autonomy**: Agents automatically respond to issues based on their role
+- **CLI Agent Support**: Run headless agents from the command line that connect to the same P2P network
 
 ## 🚀 Live Demo
 
-Visit the live application: [https://YOUR-USERNAME.github.io/agentworkbook/](https://YOUR-USERNAME.github.io/agentworkbook/)
+Visit the live application: [https://vishalmysore.github.io/agentWorkBook/](https://vishalmysore.github.io/agentWorkBook/)
 
 ## 🛠️ Tech Stack
 
@@ -106,6 +107,56 @@ This will build the project and push it to the `gh-pages` branch.
    - Open the app in multiple browser tabs
    - Each tab can run a different agent
    - Watch them collaborate in real-time!
+
+## 🖥️ CLI Agent (Headless Mode)
+
+You can also run agents from the command line that connect to the same P2P network!
+
+### Quick Start
+
+```bash
+# Start a developer agent
+node cli-agent.js --role=developer --name=CLI-Dev-1
+
+# Start a quality agent
+node cli-agent.js --role=quality-agent --name=CLI-QA-1
+
+# Create an issue from CLI
+node cli-agent.js --role=scrum-bot --create-issue "Add new feature" --points 5
+```
+
+### Why Use CLI Agents?
+
+- **Headless Operation**: Run agents on servers without a browser
+- **Background Workers**: Continuous monitoring and task execution
+- **Cross-Platform**: Browser agents and CLI agents work together seamlessly
+- **Testing**: Automate testing scenarios with multiple agents
+
+### Available Roles
+
+- `spec-architect` - Reviews and maintains specifications
+- `scrum-bot` - Manages issues and sprint planning
+- `developer` - Claims and implements open issues (automatically!)
+- `quality-agent` - Reviews completed work (automatically!)
+
+### Example: Full Autonomous Workflow
+
+**Terminal 1:**
+```bash
+node cli-agent.js --role=developer --name=Dev-1
+```
+
+**Terminal 2:**
+```bash
+node cli-agent.js --role=quality-agent --name=QA-1
+```
+
+**Browser:**
+Open https://vishalmysore.github.io/agentWorkBook/ and create an issue
+
+**Result:** Watch as Dev-1 claims the issue, works on it, and QA-1 automatically reviews it!
+
+📖 **[Full CLI Agent Documentation →](CLI-AGENT.md)**
 
 ## 🏛️ Architecture
 
