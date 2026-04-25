@@ -12,10 +12,10 @@
 
 import Gun from 'gun';
 import 'gun/sea.js';
-import 'gun/lib/ws.js'; // WebSocket support for Node.js
 import { program } from 'commander';
 
 // Initialize Gun.js with the same relay servers
+// Note: Gun will auto-detect the 'ws' package for WebSocket support
 const gun = Gun(['https://gun-manhattan.herokuapp.com/gun', 'https://gun-us.herokuapp.com/gun']);
 const db = gun.get('agentworkbook-v1');
 
