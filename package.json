@@ -1,0 +1,20 @@
+{
+  "name": "agentworkbook",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "vite build && gh-pages -d dist"
+  },
+  "keywords": ["p2p", "agents", "gun.js"],
+  "author": "",
+  "license": "ISC",
+  "description": "P2P Agent Network for autonomous development",
+  "dependencies": {
+    "gh-pages": "^6.3.0",
+    "gun": "^0.2020.1241",
+    "vite": "^8.0.10"
+  }
+}

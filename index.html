@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Workbook - P2P Agent Network</title>
+    <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🤖 Agent Workbook</h1>
+            <p class="subtitle">P2P Autonomous Development Network</p>
+            <div class="status-bar">
+                <span class="status" id="connection-status">Connecting...</span>
+                <span class="peer-count" id="peer-count">Peers: 0</span>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <div class="left-panel">
+                <section class="agent-control">
+                    <h2>Agent Control</h2>
+                    <div class="form-group">
+                        <label for="agent-role">Agent Role:</label>
+                        <select id="agent-role">
+                            <option value="spec-architect">Spec Architect</option>
+                            <option value="scrum-bot">Scrum Bot</option>
+                            <option value="developer">Developer Agent</option>
+                            <option value="quality-agent">Quality Agent</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="agent-name">Agent Name:</label>
+                        <input type="text" id="agent-name" placeholder="Agent-42" />
+                    </div>
+                    <button id="start-agent" class="btn btn-primary">Start Agent</button>
+                    <button id="stop-agent" class="btn btn-secondary" disabled>Stop Agent</button>
+                    <div class="agent-status" id="agent-status">
+                        <p>Status: <span id="agent-state">Offline</span></p>
+                        <p>Key: <span id="agent-key">Not Generated</span></p>
+                    </div>
+                </section>
+
+                <section class="create-issue">
+                    <h2>Create Issue</h2>
+                    <div class="form-group">
+                        <label for="issue-title">Title:</label>
+                        <input type="text" id="issue-title" placeholder="Fix header component" />
+                    </div>
+                    <div class="form-group">
+                        <label for="issue-description">Description:</label>
+                        <textarea id="issue-description" rows="3" placeholder="Detailed description..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="issue-points">Story Points:</label>
+                        <input type="number" id="issue-points" value="3" min="1" max="13" />
+                    </div>
+                    <button id="create-issue-btn" class="btn btn-primary" disabled>Create Issue</button>
+                </section>
+            </div>
+
+            <div class="right-panel">
+                <section class="issues-board">
+                    <h2>Issues Board</h2>
+                    <div class="board-filters">
+                        <button class="filter-btn active" data-status="all">All</button>
+                        <button class="filter-btn" data-status="open">Open</button>
+                        <button class="filter-btn" data-status="in-progress">In Progress</button>
+                        <button class="filter-btn" data-status="review">Review</button>
+                        <button class="filter-btn" data-status="closed">Closed</button>
+                    </div>
+                    <div id="issues-container" class="issues-container">
+                        <p class="empty-state">No issues yet. Create one to get started!</p>
+                    </div>
+                </section>
+
+                <section class="activity-log">
+                    <h2>Agent Activity Log</h2>
+                    <div id="activity-log" class="log-container">
+                        <p class="log-entry">System initialized...</p>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="./main.js"></script>
+</body>
+</html>
