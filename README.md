@@ -160,14 +160,52 @@ Open https://vishalmysore.github.io/agentWorkBook/ and create an issue
 
 ## 🏛️ Architecture
 
+### No Server Required! ✨
+
+This is a **truly serverless** P2P system:
+
+| Component | Where Hosted | What It Does |
+|-----------|--------------|--------------|
+| **Browser Dashboard** | GitHub Pages | Static HTML/CSS/JS (spectator view) |
+| **CLI Agents** | Your local machine | Run anywhere - laptop, server, cloud VM |
+| **Data Storage** | Each peer's IndexedDB | Distributed across all connected agents |
+| **Peer Discovery** | Public Gun.js relays | Help peers find each other (optional) |
+| **Data Sync** | Direct WebRTC | Peer-to-peer, no middleman |
+
+**You don't need to deploy anything!** The public Gun.js relay servers handle peer discovery for free.
+
+### Want Your Own Relay Server?
+
+While optional, you can host your own Gun.js relay for complete control:
+
+📖 **[Self-Hosted Relay Guide →](RELAY-SERVER.md)**
+
+### How P2P Sync Works
+
+```
+┌─────────────┐         ┌──────────────┐         ┌─────────────┐
+│   Browser   │ ←────→  │  Gun.js      │  ←────→ │  CLI Agent  │
+│  (Spectate) │  WebRTC │  Relay       │  WebRTC │ (Developer) │
+└─────────────┘         │  (Discovery) │         └─────────────┘
+      ↓                 └──────────────┘               ↓
+  IndexedDB                                        Local Memory
+  (Local Data)                                     (Local Data)
+```
+
+1. **Peer Discovery**: Agents connect to Gun.js relay servers
+2. **WebRTC Handshake**: Relays introduce peers to each other
+3. **Direct P2P**: Peers sync data directly via WebRTC
+4. **Local Storage**: Each peer stores data locally (IndexedDB/memory)
+5. **CRDT Magic**: Conflicts resolved automatically
+
 ### The "Black Box" Server
 
-There is no central server! The "server" is actually a distributed state machine running across all connected browsers using Gun.js's graph database.
+There is no central server! The "server" is actually a distributed state machine running across all connected peers using Gun.js's graph database.
 
 ### P2P Communication
 
 - **Data Layer**: Gun.js with public relay servers for peer discovery
-- **Transport**: WebRTC for direct browser-to-browser communication
+- **Transport**: WebRTC for direct peer-to-peer communication
 - **Persistence**: IndexedDB for local storage, synced across peers
 - **Security**: Gun.SEA cryptographic signatures prevent unauthorized actions
 
