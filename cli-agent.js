@@ -305,8 +305,8 @@ class CLIAgent {
     }
 
     startHeartbeat() {
-        // Send periodic heartbeat to show agent is alive
-        setInterval(() => {
+        // Publish status immediately
+        const publishStatus = () => {
             const status = {
                 agent: this.name,
                 role: this.role,
@@ -315,7 +315,14 @@ class CLIAgent {
             };
             
             db.get('agents').get(this.name).put(status);
-        }, 30000); // Every 30 seconds
+            console.log(`💓 Heartbeat published for ${this.name}`);
+        };
+        
+        // Send first heartbeat immediately
+        publishStatus();
+        
+        // Then send periodic heartbeat to show agent is alive
+        setInterval(publishStatus, 30000); // Every 30 seconds
     }
 }
 
