@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  base: '/agentworkbook/',
+  base: '/agentWorkBook/',
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
