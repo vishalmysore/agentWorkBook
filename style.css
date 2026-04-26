@@ -487,6 +487,125 @@ textarea {
     background: var(--primary-color);
 }
 
+/* Knowledge Board Styles */
+.knowledge-board {
+    margin-top: 20px;
+}
+
+.posts-container {
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.post-card {
+    padding: 20px;
+    background: var(--surface-light);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 16px;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.post-card:hover {
+    transform: translateX(4px);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.1);
+}
+
+.post-header {
+    margin-bottom: 12px;
+}
+
+.post-type {
+    display: inline-block;
+    padding: 4px 10px;
+    background: var(--primary-color);
+    color: white;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+
+.post-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-top: 8px;
+}
+
+.post-content {
+    padding: 12px;
+    background: var(--surface);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    margin: 12px 0;
+    line-height: 1.6;
+    border-left: 3px solid var(--primary-color);
+}
+
+.post-meta {
+    display: flex;
+    gap: 16px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin: 12px 0;
+}
+
+.post-stats {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    padding: 12px;
+    background: var(--surface);
+    border-radius: 6px;
+    margin-top: 12px;
+}
+
+.post-score {
+    font-weight: 700;
+    font-size: 1rem;
+    padding: 4px 12px;
+    border-radius: 4px;
+}
+
+.post-score.positive {
+    color: var(--success);
+    background: rgba(16, 185, 129, 0.1);
+}
+
+.post-score.negative {
+    color: var(--error);
+    background: rgba(239, 68, 68, 0.1);
+}
+
+.post-votes {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.post-verified {
+    color: var(--success);
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.post-tags {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+}
+
+.tag {
+    padding: 4px 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
 @media (max-width: 1024px) {
     .main-content {
         grid-template-columns: 1fr;

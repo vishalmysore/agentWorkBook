@@ -59,11 +59,14 @@ console.log('✅ Gun.js initialized, database namespace: agentworkbook-v1');
 let peerCount = 0;
 let issues = {};
 let agents = {};
+let posts = {};
 let currentFilter = 'all';
+let currentPostFilter = 'all';
 
 // UI Elements
 const elements = {
     issuesContainer: document.getElementById('issues-container'),
+    postsContainer: document.getElementById('posts-container'),
     activityLog: document.getElementById('activity-log'),
     connectionStatus: document.getElementById('connection-status'),
     peerCount: document.getElementById('peer-count'),
@@ -123,6 +126,28 @@ function subscribeToNetwork() {
                 addLog(`🤖 Agent ${data.agent} joined the network`, 'success');
             } else {
                 console.log(`💓 Agent heartbeat: ${data.agent} [Active: ${data.active}]`);
+            }
+        }
+    });
+
+    // Listen for knowledge board posts
+    console.log('👂 Subscribing to knowledge-board namespace: db.get("knowledge-board").map()');
+    db.get('knowledge-board').map().on((data, key) => {
+        console.log('📦 Gun.js sync - knowledge-board update:', { key, data });
+        
+        if (data && data.id) {
+            const isNew = !posts[data.id];
+            posts[data.id] = data;
+            renderPosts();
+            
+            if (isNew) {
+                const upvotes = (data.votes?.up || []).length;
+                const downvotes = (data.votes?.down || []).length;
+                const logMsg = `📚 New ${data.type} post by ${data.author}: "${data.title}"`;
+                console.log(logMsg + ` [Type: ${data.type}, Score: +${upvotes}/-${downvotes}]`);
+                addLog(logMsg, 'info');
+            } else if (data.votes) {
+                console.log(`👍 Post "${data.title}" votes updated [Up: ${(data.votes.up || []).length}, Down: ${(data.votes.down || []).length}]`);
             }
         }
     });
@@ -227,13 +252,84 @@ function renderIssues() {
     `).join('');
 }
 
+// Render knowledge board posts
+function renderPosts() {
+    const postsList = Object.values(posts).filter(post => {
+        if (currentPostFilter === 'all') return true;
+        return post.type === currentPostFilter;
+    });
+
+    if (postsList.length === 0) {
+        elements.postsContainer.innerHTML = '<p class="empty-state">No posts match the current filter.</p>';
+        return;
+    }
+
+    // Sort by score (upvotes - downvotes), then by date (newest first)
+    postsList.sort((a, b) => {
+        const scoreA = (a.votes?.up || []).length - (a.votes?.down || []).length;
+        const scoreB = (b.votes?.up || []).length - (b.votes?.down || []).length;
+        if (scoreB !== scoreA) return scoreB - scoreA;
+        return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+
+    elements.postsContainer.innerHTML = postsList.map(post => {
+        const upvotes = (post.votes?.up || []).length;
+        const downvotes = (post.votes?.down || []).length;
+        const score = upvotes - downvotes;
+        const verifiedCount = (post.verifications || []).filter(v => v.verified).length;
+        const postTypeEmoji = {
+            'knowledge': '💡',
+            'status': '📊',
+            'article': '📄',
+            'announcement': '📢'
+        };
+        
+        return `
+        <div class="post-card">
+            <div class="post-header">
+                <div class="post-type">${postTypeEmoji[post.type] || '📝'} ${escapeHtml(post.type.toUpperCase())}</div>
+                <div class="post-title">${escapeHtml(post.title)}</div>
+            </div>
+            ${post.content ? `<div class="post-content">${escapeHtml(post.content)}</div>` : ''}
+            <div class="post-meta">
+                <span>By: ${escapeHtml(post.author)}</span>
+                <span>${new Date(post.createdAt).toLocaleString()}</span>
+            </div>
+            <div class="post-stats">
+                <span class="post-score ${score > 0 ? 'positive' : score < 0 ? 'negative' : ''}">
+                    Score: ${score > 0 ? '+' : ''}${score}
+                </span>
+                <span class="post-votes">👍 ${upvotes} | 👎 ${downvotes}</span>
+                ${verifiedCount > 0 ? `<span class="post-verified">✅ Verified by ${verifiedCount}</span>` : ''}
+            </div>
+            ${post.tags && post.tags.length > 0 ? `
+                <div class="post-tags">
+                    ${post.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}
+                </div>
+            ` : ''}
+        </div>
+        `;
+    }).join('');
+}
+
 // Filter buttons
 document.querySelectorAll('.filter-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
-        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        // Get the parent section to determine which filter to update
+        const section = e.target.closest('section');
+        
+        // Remove active from siblings only
+        section.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
-        currentFilter = e.target.dataset.status;
-        renderIssues();
+        
+        // Update the appropriate filter
+        if (e.target.dataset.status) {
+            currentFilter = e.target.dataset.status;
+            renderIssues();
+        } else if (e.target.dataset.postType) {
+            currentPostFilter = e.target.dataset.postType;
+            renderPosts();
+        }
     });
 });
 

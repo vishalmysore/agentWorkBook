@@ -356,6 +356,173 @@ class CLIAgent {
         console.log(`   Status: open\n`);
     }
 
+    // ============ KNOWLEDGE BOARD METHODS ============
+
+    async createPost(type, title, content, tags = []) {
+        if (!this.keypair) {
+            console.error('❌ Error: Agent not initialized');
+            return;
+        }
+
+        const post = {
+            id: Date.now(),
+            type, // knowledge, status, article, announcement
+            title,
+            content,
+            tags: Array.isArray(tags) ? tags : tags.split(',').map(t => t.trim()),
+            author: this.name,
+            authorKey: this.keypair.pub,
+            createdAt: new Date().toISOString(),
+            votes: {
+                up: [],
+                down: []
+            },
+            verifications: []
+        };
+
+        const signedPost = await this.signData(post);
+
+        db.get('knowledge-board').get(post.id.toString()).put({
+            ...post,
+            signature: signedPost
+        });
+
+        console.log(`\n📢 Post created on Knowledge Board:`);
+        console.log(`   Type: ${type}`);
+        console.log(`   Title: "${title}"`);
+        console.log(`   ID: #${post.id}`);
+        console.log(`   Tags: ${post.tags.join(', ')}\n`);
+    }
+
+    async voteOnPost(postId, voteType) {
+        if (!this.keypair) {
+            console.error('❌ Error: Agent not initialized');
+            return;
+        }
+
+        db.get('knowledge-board').get(postId.toString()).once((post) => {
+            if (!post || !post.id) {
+                console.log(`❌ Post #${postId} not found`);
+                return;
+            }
+
+            const votes = post.votes || { up: [], down: [] };
+            const agentName = this.name;
+
+            // Remove from opposite vote array if exists
+            if (voteType === 'up') {
+                votes.down = (votes.down || []).filter(v => v !== agentName);
+                if (!votes.up.includes(agentName)) {
+                    votes.up.push(agentName);
+                    console.log(`👍 ${this.name} upvoted post #${postId}: "${post.title}"`);
+                } else {
+                    console.log(`   (Already upvoted)`);
+                }
+            } else if (voteType === 'down') {
+                votes.up = (votes.up || []).filter(v => v !== agentName);
+                if (!votes.down.includes(agentName)) {
+                    votes.down.push(agentName);
+                    console.log(`👎 ${this.name} downvoted post #${postId}: "${post.title}"`);
+                } else {
+                    console.log(`   (Already downvoted)`);
+                }
+            }
+
+            db.get('knowledge-board').get(postId.toString()).get('votes').put(votes);
+        });
+    }
+
+    async verifyPost(postId, verified, reason = '') {
+        if (!this.keypair) {
+            console.error('❌ Error: Agent not initialized');
+            return;
+        }
+
+        db.get('knowledge-board').get(postId.toString()).once(async (post) => {
+            if (!post || !post.id) {
+                console.log(`❌ Post #${postId} not found`);
+                return;
+            }
+
+            const verification = {
+                agent: this.name,
+                agentKey: this.keypair.pub,
+                verified,
+                reason,
+                timestamp: new Date().toISOString()
+            };
+
+            const verifications = post.verifications || [];
+            verifications.push(verification);
+
+            db.get('knowledge-board').get(postId.toString()).get('verifications').put(verifications);
+
+            console.log(`✅ ${this.name} verified post #${postId}: "${post.title}"`);
+            console.log(`   Status: ${verified ? '✓ VERIFIED' : '✗ REJECTED'}`);
+            if (reason) console.log(`   Reason: ${reason}`);
+        });
+    }
+
+    subscribeToKnowledgeBoard() {
+        console.log(`\n📚 Subscribed to Knowledge Board updates...\n`);
+        
+        db.get('knowledge-board').map().on((post, key) => {
+            if (post && post.id && post.authorKey !== this.keypair?.pub) {
+                const timestamp = new Date().toLocaleTimeString();
+                const upvotes = (post.votes?.up || []).length;
+                const downvotes = (post.votes?.down || []).length;
+                const verifiedCount = (post.verifications || []).filter(v => v.verified).length;
+                
+                console.log(`\n[${timestamp}] 📬 Knowledge Board Update:`);
+                console.log(`   Type: ${post.type}`);
+                console.log(`   Title: "${post.title}"`);
+                console.log(`   Author: ${post.author}`);
+                console.log(`   ID: #${post.id}`);
+                console.log(`   Votes: 👍 ${upvotes} | 👎 ${downvotes}`);
+                console.log(`   Verified: ${verifiedCount} agents`);
+                if (post.tags && post.tags.length > 0) {
+                    console.log(`   Tags: ${post.tags.join(', ')}`);
+                }
+            }
+        });
+    }
+
+    listPosts(filterType = null) {
+        console.log(`\n📚 Knowledge Board Posts:\n`);
+        console.log('═'.repeat(70));
+        
+        db.get('knowledge-board').map().once((post, key) => {
+            if (post && post.id) {
+                if (filterType && post.type !== filterType) return;
+                
+                const upvotes = (post.votes?.up || []).length;
+                const downvotes = (post.votes?.down || []).length;
+                const score = upvotes - downvotes;
+                const verifiedCount = (post.verifications || []).filter(v => v.verified).length;
+                
+                console.log(`\n📄 #${post.id} [${post.type.toUpperCase()}]`);
+                console.log(`   "${post.title}"`);
+                console.log(`   By: ${post.author} | ${new Date(post.createdAt).toLocaleString()}`);
+                console.log(`   Score: ${score > 0 ? '+' : ''}${score} (👍 ${upvotes}, 👎 ${downvotes})`);
+                console.log(`   Verified by: ${verifiedCount} agents`);
+                if (post.content) {
+                    const preview = post.content.length > 100 
+                        ? post.content.substring(0, 100) + '...' 
+                        : post.content;
+                    console.log(`   Content: ${preview}`);
+                }
+                if (post.tags && post.tags.length > 0) {
+                    console.log(`   Tags: ${post.tags.join(', ')}`);
+                }
+                console.log('─'.repeat(70));
+            }
+        });
+        
+        setTimeout(() => {
+            console.log('\n💡 Use --post-id <id> with --vote or --verify to interact\n');
+        }, 2000);
+    }
+
     startHeartbeat() {
         // Publish status immediately
         const publishStatus = () => {
@@ -387,7 +554,19 @@ program
     .option('-n, --name <name>', 'Agent name', `CLI-Agent-${Math.floor(Math.random() * 999)}`)
     .option('-c, --create-issue <title>', 'Create a new issue')
     .option('-d, --description <text>', 'Issue description', 'Created by CLI agent')
-    .option('-p, --points <number>', 'Story points', '3');
+    .option('-p, --points <number>', 'Story points', '3')
+    // Knowledge Board options
+    .option('--post <title>', 'Create a post on the knowledge board')
+    .option('--post-type <type>', 'Post type: knowledge, status, article, announcement', 'knowledge')
+    .option('--post-content <text>', 'Post content/body')
+    .option('--tags <tags>', 'Comma-separated tags for the post')
+    .option('--list-posts [type]', 'List all posts (optionally filter by type)')
+    .option('--post-id <id>', 'Post ID for voting or verification')
+    .option('--vote <type>', 'Vote on a post: up or down (requires --post-id)')
+    .option('--verify', 'Verify a post (requires --post-id)')
+    .option('--verify-status <status>', 'Verification status: true or false', 'true')
+    .option('--verify-reason <reason>', 'Reason for verification/rejection')
+    .option('--watch-board', 'Subscribe to knowledge board updates in real-time');
 
 program.parse();
 
@@ -501,6 +680,52 @@ async function main() {
                 options.points
             );
         }, 2000);
+    }
+
+    // Knowledge Board commands
+    if (options.post) {
+        setTimeout(async () => {
+            const validTypes = ['knowledge', 'status', 'article', 'announcement'];
+            if (!validTypes.includes(options.postType)) {
+                console.error(`❌ Invalid post type. Must be one of: ${validTypes.join(', ')}`);
+                return;
+            }
+            await agent.createPost(
+                options.postType,
+                options.post,
+                options.postContent || '',
+                options.tags || []
+            );
+        }, 2000);
+    }
+
+    if (options.listPosts !== undefined) {
+        setTimeout(() => {
+            const filterType = typeof options.listPosts === 'string' ? options.listPosts : null;
+            agent.listPosts(filterType);
+        }, 2000);
+    }
+
+    if (options.vote && options.postId) {
+        const validVotes = ['up', 'down'];
+        if (!validVotes.includes(options.vote)) {
+            console.error(`❌ Invalid vote type. Must be: up or down`);
+            process.exit(1);
+        }
+        setTimeout(async () => {
+            await agent.voteOnPost(options.postId, options.vote);
+        }, 2000);
+    }
+
+    if (options.verify && options.postId) {
+        setTimeout(async () => {
+            const verified = options.verifyStatus === 'true';
+            await agent.verifyPost(options.postId, verified, options.verifyReason || '');
+        }, 2000);
+    }
+
+    if (options.watchBoard) {
+        agent.subscribeToKnowledgeBoard();
     }
 
     // Handle graceful shutdown
