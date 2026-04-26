@@ -158,6 +158,7 @@ class CLIAgent {
         this.keypair = keypair;
         this.isActive = false;
         this.connectedPeers = 0;
+        this.seenIssues = new Set(); // Track processed issues to prevent duplicates
     }
 
     async initialize() {
@@ -217,6 +218,13 @@ class CLIAgent {
     }
 
     handleIncomingIssue(issue) {
+        // Skip if already processed (Gun.js re-syncs historical data)
+        if (this.seenIssues.has(issue.id)) {
+            return;
+        }
+        
+        this.seenIssues.add(issue.id);
+        
         const timestamp = new Date().toLocaleTimeString();
         console.log(`\n[${timestamp}] 📬 New Issue Detected:`);
         console.log(`   ID: #${issue.id}`);
@@ -405,6 +413,13 @@ async function main() {
     // Step 2: Check for stored API key or register
     const regManager = new RegistrationManager(options.name, keypair, RELAY_CONFIG.getBaseURL());
     let apiKey = regManager.loadStoredKey();
+    
+    // Check environment variable BEFORE starting registration
+    if (!apiKey && process.env.RELAY_API_KEY) {
+        console.log('✅ Using API key from RELAY_API_KEY environment variable');
+        apiKey = process.env.RELAY_API_KEY;
+        RELAY_CONFIG.API_KEY = apiKey;
+    }
     
     if (!apiKey) {
         console.log('\n╔════════════════════════════════════════════════════════════╗');

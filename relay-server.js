@@ -550,9 +550,41 @@ const gun = Gun({
     axe: false // Disable multicast for production
 });
 
-// Track WebSocket connections
+// Track WebSocket connections with API key validation
 server.on('upgrade', (request, socket, head) => {
     const ip = getClientIP({ headers: request.headers, connection: socket });
+    
+    // Extract API key from query string or headers
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    const apiKey = url.searchParams.get('key') || request.headers['x-api-key'];
+    
+    // Validate API key for WebSocket connections
+    if (!apiKey) {
+        metrics.blockedAuth++;
+        logSecurity('WS_MISSING_API_KEY', { ip, timestamp: new Date().toISOString() });
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+    }
+    
+    if (!API_KEYS.includes(apiKey)) {
+        metrics.blockedAuth++;
+        logSecurity('WS_INVALID_API_KEY', { 
+            ip, 
+            key: apiKey.substring(0, 8) + '...', 
+            timestamp: new Date().toISOString() 
+        });
+        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+        socket.destroy();
+        return;
+    }
+    
+    // Authentication successful
+    logSecurity('WS_AUTH_SUCCESS', { 
+        ip, 
+        key: apiKey.substring(0, 8) + '...', 
+        timestamp: new Date().toISOString() 
+    });
     
     metrics.activeConnections++;
     metrics.totalConnections++;
@@ -560,7 +592,7 @@ server.on('upgrade', (request, socket, head) => {
     const currentIPConnections = metrics.connectionsByIP.get(ip) || 0;
     metrics.connectionsByIP.set(ip, currentIPConnections + 1);
     
-    logConnection('CONNECTED', { ip, active: metrics.activeConnections });
+    logConnection('CONNECTED', { ip, active: metrics.activeConnections, key: apiKey.substring(0, 8) + '...' });
     
     socket.on('close', () => {
         metrics.activeConnections--;
