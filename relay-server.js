@@ -62,6 +62,86 @@ const metrics = {
     connectionsByIP: new Map()
 };
 
+// Per-key rate limiting system
+const keyRateLimits = {
+    // Track message counts per API key: Map<apiKey, {count, resetTime}>
+    messageCounts: new Map(),
+    
+    // API Key tiers with daily message limits
+    tiers: {
+        demo: { limit: 4, pattern: /^demo-/ },           // Demo keys: 4 messages/day (testing only)
+        bootstrap: { limit: 200, pattern: /^agent-bootstrap/ }, // Bootstrap validators: 200 messages/day
+        spectator: { limit: 10000, pattern: /^spectator-/ },    // Spectator keys: unlimited (read-only)
+        registered: { limit: 1000, pattern: /^agent-[a-f0-9]{64}$/ } // Self-registered (FULL): 1000 messages/day
+    },
+    
+    // Get tier for API key
+    getTier(apiKey) {
+        for (const [tierName, config] of Object.entries(this.tiers)) {
+            if (config.pattern.test(apiKey)) {
+                return { name: tierName, ...config };
+            }
+        }
+        return { name: 'demo', limit: 4 }; // Default to most restrictive
+    },
+    
+    // Check if key can send message
+    canSendMessage(apiKey) {
+        const tier = this.getTier(apiKey);
+        const now = Date.now();
+        
+        if (!this.messageCounts.has(apiKey)) {
+            this.messageCounts.set(apiKey, {
+                count: 0,
+                resetTime: this.getNextMidnight()
+            });
+        }
+        
+        const counter = this.messageCounts.get(apiKey);
+        
+        // Reset counter if past midnight
+        if (now >= counter.resetTime) {
+            counter.count = 0;
+            counter.resetTime = this.getNextMidnight();
+        }
+        
+        return counter.count < tier.limit;
+    },
+    
+    // Increment message count
+    incrementCount(apiKey) {
+        const counter = this.messageCounts.get(apiKey);
+        if (counter) {
+            counter.count++;
+        }
+    },
+    
+    // Get remaining messages for key
+    getRemainingMessages(apiKey) {
+        const tier = this.getTier(apiKey);
+        const counter = this.messageCounts.get(apiKey);
+        
+        if (!counter) {
+            return tier.limit;
+        }
+        
+        // Check if reset needed
+        if (Date.now() >= counter.resetTime) {
+            return tier.limit;
+        }
+        
+        return Math.max(0, tier.limit - counter.count);
+    },
+    
+    // Get next midnight timestamp
+    getNextMidnight() {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(0, 0, 0, 0);
+        return tomorrow.getTime();
+    }
+};
+
 // Agent Registration System
 // Stores issued API keys and pending registrations
 const registrationSystem = {
@@ -243,6 +323,31 @@ function authenticateAPIKey(req, res, next) {
         });
         return res.status(403).json({ error: 'Invalid API key' });
     }
+    
+    // Check per-key daily message limit
+    if (!keyRateLimits.canSendMessage(apiKey)) {
+        const tier = keyRateLimits.getTier(apiKey);
+        metrics.rateLimitHits++;
+        logSecurity('KEY_DAILY_LIMIT', { 
+            ip: getClientIP(req), 
+            key: apiKey.substring(0, 8) + '...', 
+            tier: tier.name,
+            limit: tier.limit,
+            timestamp: new Date().toISOString() 
+        });
+        return res.status(429).json({ 
+            error: 'Daily message limit exceeded',
+            tier: tier.name,
+            limit: tier.limit,
+            resetTime: new Date(keyRateLimits.messageCounts.get(apiKey)?.resetTime || 0).toISOString()
+        });
+    }
+    
+    // Increment message count
+    keyRateLimits.incrementCount(apiKey);
+    
+    // Store key in request for later use
+    req.apiKey = apiKey;
     
     next();
 }
@@ -479,6 +584,7 @@ app.get('/info', (req, res) => {
             register: relayURL + '/register',
             registrationStatus: relayURL + '/register/:id',
             metrics: relayURL + '/metrics',
+            quota: relayURL + '/quota (check remaining messages)',
             gunSync: relayURL.replace('http://', 'ws://').replace('https://', 'wss://') + '/gun'
         },
         quickStart: {
@@ -496,6 +602,12 @@ app.get('/info', (req, res) => {
         security: {
             authentication: 'API key required (query param or header)',
             rateLimiting: `${RATE_LIMIT_MAX} requests per ${RATE_LIMIT_WINDOW}ms per IP`,
+            perKeyLimits: {
+                demo: '4 messages/day (demo-* testing keys)',
+                bootstrap: '200 messages/day (agent-bootstrap* - demo validator keys)',
+                registered: '1000 messages/day (agent-[64hex] - FULL self-registered keys)',
+                spectator: 'Unlimited read-only (spectator-* keys)'
+            },
             sybilPrevention: 'Validators must be on different IP addresses',
             encryption: 'Gun.SEA cryptographic signatures'
         },
@@ -535,6 +647,24 @@ app.get('/metrics', (req, res) => {
     };
     
     res.json(metricsData);
+});
+
+// Check remaining messages for API key
+app.get('/quota', authenticateAPIKey, (req, res) => {
+    const apiKey = req.apiKey;
+    const tier = keyRateLimits.getTier(apiKey);
+    const remaining = keyRateLimits.getRemainingMessages(apiKey);
+    const counter = keyRateLimits.messageCounts.get(apiKey);
+    
+    res.json({
+        apiKey: apiKey.substring(0, 8) + '...',
+        tier: tier.name,
+        dailyLimit: tier.limit,
+        remaining: remaining,
+        used: counter ? counter.count : 0,
+        resetTime: counter ? new Date(counter.resetTime).toISOString() : null,
+        timestamp: new Date().toISOString()
+    });
 });
 
 // Gun.js endpoint with authentication
@@ -579,10 +709,38 @@ server.on('upgrade', (request, socket, head) => {
         return;
     }
     
+    // Check per-key daily message limit
+    if (!keyRateLimits.canSendMessage(apiKey)) {
+        const tier = keyRateLimits.getTier(apiKey);
+        metrics.rateLimitHits++;
+        logSecurity('WS_KEY_DAILY_LIMIT', { 
+            ip, 
+            key: apiKey.substring(0, 8) + '...', 
+            tier: tier.name,
+            limit: tier.limit,
+            timestamp: new Date().toISOString() 
+        });
+        socket.write('HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\n\r\n');
+        socket.write(JSON.stringify({ 
+            error: 'Daily message limit exceeded',
+            tier: tier.name,
+            limit: tier.limit,
+            resetTime: new Date(keyRateLimits.messageCounts.get(apiKey)?.resetTime || 0).toISOString()
+        }));
+        socket.destroy();
+        return;
+    }
+    
+    // Increment message count
+    keyRateLimits.incrementCount(apiKey);
+    
     // Authentication successful
+    const tier = keyRateLimits.getTier(apiKey);
     logSecurity('WS_AUTH_SUCCESS', { 
         ip, 
         key: apiKey.substring(0, 8) + '...', 
+        tier: tier.name,
+        remaining: keyRateLimits.getRemainingMessages(apiKey),
         timestamp: new Date().toISOString() 
     });
     
