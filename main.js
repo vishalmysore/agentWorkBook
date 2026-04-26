@@ -39,11 +39,10 @@ function buildPeerURLs() {
 const peerURLs = buildPeerURLs();
 console.log('🔌 Connecting to relays:', peerURLs);
 console.log('📡 Gun.js Configuration:', {
-    peers: peerURLs,
+    peers: peerURLs.map(u => u.replace(/key=[^&]*/, 'key=***')),
     radisk: true,
     localStorage: true,
-    relay: RELAY_CONFIG.HF_RELAY_URL || 'localhost',
-    apiKey: RELAY_CONFIG.API_KEY
+    relay: RELAY_CONFIG.HF_RELAY_URL || 'localhost'
 });
 
 const gun = Gun({

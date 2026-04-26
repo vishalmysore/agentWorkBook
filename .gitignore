@@ -36,3 +36,7 @@ radata-*
 .env
 .env.local
 .env.*.local
+
+# Agent secrets
+.agentkey
+*.agentkey
