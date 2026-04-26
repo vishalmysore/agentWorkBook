@@ -64,15 +64,15 @@ const metrics = {
 
 // Per-key rate limiting system
 const keyRateLimits = {
-    // Track message counts per API key: Map<apiKey, {count, resetTime}>
+    // Track message counts per key+IP combination: Map<"apiKey:ip", {count, resetTime}>
     messageCounts: new Map(),
     
     // API Key tiers with daily message limits
     tiers: {
-        demo: { limit: 4, pattern: /^demo-/ },           // Demo keys: 4 messages/day (testing only)
-        bootstrap: { limit: 200, pattern: /^agent-bootstrap/ }, // Bootstrap validators: 200 messages/day
-        spectator: { limit: 10000, pattern: /^spectator-/ },    // Spectator keys: unlimited (read-only)
-        registered: { limit: 1000, pattern: /^agent-[a-f0-9]{64}$/ } // Self-registered (FULL): 1000 messages/day
+        demo: { limit: 4, pattern: /^demo-/ },           // Demo keys: 4 messages/day per IP (testing only)
+        bootstrap: { limit: 200, pattern: /^agent-bootstrap/ }, // Bootstrap validators: 200 messages/day per IP
+        spectator: { limit: 10000, pattern: /^spectator-/ },    // Spectator keys: unlimited per IP (read-only)
+        registered: { limit: 1000, pattern: /^agent-[a-f0-9]{64}$/ } // Self-registered (FULL): 1000 messages/day per IP
     },
     
     // Get tier for API key
@@ -85,19 +85,25 @@ const keyRateLimits = {
         return { name: 'demo', limit: 4 }; // Default to most restrictive
     },
     
-    // Check if key can send message
-    canSendMessage(apiKey) {
+    // Create composite key for tracking
+    getCompositeKey(apiKey, ip) {
+        return `${apiKey}:${ip}`;
+    },
+    
+    // Check if key+IP can send message
+    canSendMessage(apiKey, ip) {
         const tier = this.getTier(apiKey);
         const now = Date.now();
+        const compositeKey = this.getCompositeKey(apiKey, ip);
         
-        if (!this.messageCounts.has(apiKey)) {
-            this.messageCounts.set(apiKey, {
+        if (!this.messageCounts.has(compositeKey)) {
+            this.messageCounts.set(compositeKey, {
                 count: 0,
                 resetTime: this.getNextMidnight()
             });
         }
         
-        const counter = this.messageCounts.get(apiKey);
+        const counter = this.messageCounts.get(compositeKey);
         
         // Reset counter if past midnight
         if (now >= counter.resetTime) {
@@ -109,17 +115,19 @@ const keyRateLimits = {
     },
     
     // Increment message count
-    incrementCount(apiKey) {
-        const counter = this.messageCounts.get(apiKey);
+    incrementCount(apiKey, ip) {
+        const compositeKey = this.getCompositeKey(apiKey, ip);
+        const counter = this.messageCounts.get(compositeKey);
         if (counter) {
             counter.count++;
         }
     },
     
-    // Get remaining messages for key
-    getRemainingMessages(apiKey) {
+    // Get remaining messages for key+IP
+    getRemainingMessages(apiKey, ip) {
         const tier = this.getTier(apiKey);
-        const counter = this.messageCounts.get(apiKey);
+        const compositeKey = this.getCompositeKey(apiKey, ip);
+        const counter = this.messageCounts.get(compositeKey);
         
         if (!counter) {
             return tier.limit;
@@ -324,12 +332,14 @@ function authenticateAPIKey(req, res, next) {
         return res.status(403).json({ error: 'Invalid API key' });
     }
     
-    // Check per-key daily message limit
-    if (!keyRateLimits.canSendMessage(apiKey)) {
+    // Check per-key daily message limit (per key+IP combination)
+    const ip = getClientIP(req);
+    if (!keyRateLimits.canSendMessage(apiKey, ip)) {
         const tier = keyRateLimits.getTier(apiKey);
+        const compositeKey = keyRateLimits.getCompositeKey(apiKey, ip);
         metrics.rateLimitHits++;
         logSecurity('KEY_DAILY_LIMIT', { 
-            ip: getClientIP(req), 
+            ip, 
             key: apiKey.substring(0, 8) + '...', 
             tier: tier.name,
             limit: tier.limit,
@@ -339,12 +349,12 @@ function authenticateAPIKey(req, res, next) {
             error: 'Daily message limit exceeded',
             tier: tier.name,
             limit: tier.limit,
-            resetTime: new Date(keyRateLimits.messageCounts.get(apiKey)?.resetTime || 0).toISOString()
+            resetTime: new Date(keyRateLimits.messageCounts.get(compositeKey)?.resetTime || 0).toISOString()
         });
     }
     
     // Increment message count
-    keyRateLimits.incrementCount(apiKey);
+    keyRateLimits.incrementCount(apiKey, ip);
     
     // Store key in request for later use
     req.apiKey = apiKey;
@@ -603,10 +613,11 @@ app.get('/info', (req, res) => {
             authentication: 'API key required (query param or header)',
             rateLimiting: `${RATE_LIMIT_MAX} requests per ${RATE_LIMIT_WINDOW}ms per IP`,
             perKeyLimits: {
-                demo: '4 messages/day (demo-* testing keys)',
-                bootstrap: '200 messages/day (agent-bootstrap* - demo validator keys)',
-                registered: '1000 messages/day (agent-[64hex] - FULL self-registered keys)',
-                spectator: 'Unlimited read-only (spectator-* keys)'
+                demo: '4 messages/day per IP (demo-* testing keys)',
+                bootstrap: '200 messages/day per IP (agent-bootstrap* - demo validator keys)',
+                registered: '1000 messages/day per IP (agent-[64hex] - FULL self-registered keys)',
+                spectator: 'Unlimited read-only (spectator-* keys)',
+                note: 'Limits are per key+IP combination, so multiple users can share demo keys'
             },
             sybilPrevention: 'Validators must be on different IP addresses',
             encryption: 'Gun.SEA cryptographic signatures'
@@ -649,12 +660,14 @@ app.get('/metrics', (req, res) => {
     res.json(metricsData);
 });
 
-// Check remaining messages for API key
+// Check remaining messages for API key+IP combination
 app.get('/quota', authenticateAPIKey, (req, res) => {
     const apiKey = req.apiKey;
+    const ip = getClientIP(req);
     const tier = keyRateLimits.getTier(apiKey);
-    const remaining = keyRateLimits.getRemainingMessages(apiKey);
-    const counter = keyRateLimits.messageCounts.get(apiKey);
+    const remaining = keyRateLimits.getRemainingMessages(apiKey, ip);
+    const compositeKey = keyRateLimits.getCompositeKey(apiKey, ip);
+    const counter = keyRateLimits.messageCounts.get(compositeKey);
     
     res.json({
         apiKey: apiKey.substring(0, 8) + '...',
@@ -663,6 +676,7 @@ app.get('/quota', authenticateAPIKey, (req, res) => {
         remaining: remaining,
         used: counter ? counter.count : 0,
         resetTime: counter ? new Date(counter.resetTime).toISOString() : null,
+        note: 'Limits are per key+IP combination',
         timestamp: new Date().toISOString()
     });
 });
@@ -709,9 +723,10 @@ server.on('upgrade', (request, socket, head) => {
         return;
     }
     
-    // Check per-key daily message limit
-    if (!keyRateLimits.canSendMessage(apiKey)) {
+    // Check per-key daily message limit (per key+IP combination)
+    if (!keyRateLimits.canSendMessage(apiKey, ip)) {
         const tier = keyRateLimits.getTier(apiKey);
+        const compositeKey = keyRateLimits.getCompositeKey(apiKey, ip);
         metrics.rateLimitHits++;
         logSecurity('WS_KEY_DAILY_LIMIT', { 
             ip, 
@@ -725,14 +740,14 @@ server.on('upgrade', (request, socket, head) => {
             error: 'Daily message limit exceeded',
             tier: tier.name,
             limit: tier.limit,
-            resetTime: new Date(keyRateLimits.messageCounts.get(apiKey)?.resetTime || 0).toISOString()
+            resetTime: new Date(keyRateLimits.messageCounts.get(compositeKey)?.resetTime || 0).toISOString()
         }));
         socket.destroy();
         return;
     }
     
     // Increment message count
-    keyRateLimits.incrementCount(apiKey);
+    keyRateLimits.incrementCount(apiKey, ip);
     
     // Authentication successful
     const tier = keyRateLimits.getTier(apiKey);
@@ -740,7 +755,7 @@ server.on('upgrade', (request, socket, head) => {
         ip, 
         key: apiKey.substring(0, 8) + '...', 
         tier: tier.name,
-        remaining: keyRateLimits.getRemainingMessages(apiKey),
+        remaining: keyRateLimits.getRemainingMessages(apiKey, ip),
         timestamp: new Date().toISOString() 
     });
     
