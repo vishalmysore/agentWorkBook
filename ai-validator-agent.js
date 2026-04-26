@@ -49,15 +49,11 @@ Return ONLY valid JSON with this structure:
 Be creative and avoid common questions. The question should test intelligence, not memorization.`;
 
         try {
-            // Determine authorization header format based on API URL
-            const isNvidia = this.apiUrl.includes('nvidia.com');
-            const authHeader = isNvidia ? this.apiKey : `Bearer ${this.apiKey}`;
-            
             const response = await fetch(`${this.apiUrl}/chat/completions`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': authHeader
+                    'Authorization': `Bearer ${this.apiKey}`
                 },
                 body: JSON.stringify({
                     model: this.model,
@@ -77,6 +73,9 @@ Be creative and avoid common questions. The question should test intelligence, n
             });
 
             if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`   API Response Status: ${response.status}`);
+                console.error(`   API Response Body: ${errorText}`);
                 throw new Error(`LLM API error: ${response.statusText}`);
             }
 
@@ -112,15 +111,11 @@ Question: ${question}
 Provide ONLY the answer - no explanation, no extra text. Just the answer.`;
 
         try {
-            // Determine authorization header format based on API URL
-            const isNvidia = this.apiUrl.includes('nvidia.com');
-            const authHeader = isNvidia ? this.apiKey : `Bearer ${this.apiKey}`;
-            
             const response = await fetch(`${this.apiUrl}/chat/completions`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': authHeader
+                    'Authorization': `Bearer ${this.apiKey}`
                 },
                 body: JSON.stringify({
                     model: this.model,
@@ -153,13 +148,9 @@ Provide ONLY the answer - no explanation, no extra text. Just the answer.`;
 
     async testConnection() {
         try {
-            // Determine authorization header format based on API URL
-            const isNvidia = this.apiUrl.includes('nvidia.com');
-            const authHeader = isNvidia ? this.apiKey : `Bearer ${this.apiKey}`;
-            
             const response = await fetch(`${this.apiUrl}/models`, {
                 headers: {
-                    'Authorization': authHeader
+                    'Authorization': `Bearer ${this.apiKey}`
                 }
             });
             return response.ok;
@@ -195,6 +186,7 @@ class AIValidatorAgent {
             localStorage: false,
             radisk: false
         });
+        this.db = this.gun.get('agentworkbook-v1');
 
         console.log(`✅ Validator initialized\n`);
     }
@@ -203,7 +195,7 @@ class AIValidatorAgent {
         console.log(`👂 Subscribing to registration requests...\n`);
 
         // Watch for registration requests
-        this.gun.get('registrations').map().on(async (registration, id) => {
+        this.db.get('registrations').map().on(async (registration, id) => {
             if (!registration || !registration.agentName) return;
             
             // Skip if we already issued a challenge for this registration
@@ -242,14 +234,14 @@ class AIValidatorAgent {
 
             // Publish challenge to the network
             const signedChallenge = await Gun.SEA.sign(issuedChallenge, this.keypair);
-            this.gun.get('challenges').get(challengeId).put(signedChallenge);
+            this.db.get('challenges').get(challengeId).put(signedChallenge);
             
             console.log(`📤 Issued challenge ID: ${challengeId}`);
             console.log(`⏳ Waiting for response...\n`);
         });
 
         // Watch for challenge responses
-        this.gun.get('challengeResponses').map().on(async (response, responseId) => {
+        this.db.get('challengeResponses').map().on(async (response, responseId) => {
             if (!response || !response.challengeId) return;
             
             const challengeData = this.issuedChallenges.get(response.challengeId);
@@ -279,7 +271,7 @@ class AIValidatorAgent {
             };
 
             const signedValidation = await Gun.SEA.sign(validation, this.keypair);
-            this.gun.get('validations').get(responseId).put(signedValidation);
+            this.db.get('validations').get(responseId).put(signedValidation);
             
             console.log(`📤 Validation published\n`);
             
@@ -291,7 +283,7 @@ class AIValidatorAgent {
 
         // Publish heartbeat
         setInterval(() => {
-            this.gun.get('agents').get(this.name).put({
+            this.db.get('agents').get(this.name).put({
                 name: this.name,
                 role: 'validator',
                 type: 'ai-powered',
