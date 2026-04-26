@@ -38,6 +38,13 @@ function buildPeerURLs() {
 // Initialize Gun.js with secure relay
 const peerURLs = buildPeerURLs();
 console.log('🔌 Connecting to relays:', peerURLs);
+console.log('📡 Gun.js Configuration:', {
+    peers: peerURLs,
+    radisk: true,
+    localStorage: true,
+    relay: RELAY_CONFIG.HF_RELAY_URL || 'localhost',
+    apiKey: RELAY_CONFIG.API_KEY
+});
 
 const gun = Gun({
     peers: peerURLs.length > 0 ? peerURLs : [], // Will use WebRTC if no peers
@@ -46,6 +53,7 @@ const gun = Gun({
 });
 
 const db = gun.get('agentworkbook-v1');
+console.log('✅ Gun.js initialized, database namespace: agentworkbook-v1');
 
 // Global state for spectating
 let peerCount = 0;
@@ -71,10 +79,14 @@ subscribeToNetwork();
 
 // Subscribe to P2P network (read-only)
 function subscribeToNetwork() {
+    console.log('🔭 Starting spectator mode - subscribing to P2P network...');
     addLog('🔭 Spectator mode: Watching agent activity...', 'info');
     
     // Listen for issues
+    console.log('👂 Subscribing to issues namespace: db.get("issues").map()');
     db.get('issues').map().on((data, key) => {
+        console.log('📦 Gun.js sync - issues update:', { key, data });
+        
         if (data && data.id) {
             const isNew = !issues[data.id];
             issues[data.id] = data;
@@ -82,19 +94,36 @@ function subscribeToNetwork() {
             updateStats();
             
             if (isNew) {
-                addLog(`📬 New issue created by ${data.createdBy}: "${data.title}"`, 'info');
+                const logMsg = `📬 New issue created by ${data.createdBy}: "${data.title}"`;
+                console.log(logMsg + ` [Status: ${data.status}, Points: ${data.points}]`);
+                addLog(logMsg, 'info');
             } else if (data.assignedTo) {
-                addLog(`👤 Issue "${data.title}" assigned to ${data.assignedTo}`, 'info');
+                const logMsg = `👤 Issue "${data.title}" assigned to ${data.assignedTo}`;
+                console.log(logMsg + ` [Previous assignee: ${issues[data.id].assignedTo || 'none'}]`);
+                addLog(logMsg, 'info');
+            } else {
+                console.log(`🔄 Issue updated: "${data.title}" [Status: ${data.status}]`);
             }
         }
     });
 
     // Listen for active agents
+    console.log('👂 Subscribing to agents namespace: db.get("agents").map()');
     db.get('agents').map().on((data, key) => {
+        console.log('📦 Gun.js sync - agents update:', { key, data });
+        
         if (data && data.agent) {
+            const isNew = !agents[data.agent];
             agents[data.agent] = data;
             renderAgents();
             updateStats();
+            
+            if (isNew) {
+                console.log(`🤖 New agent joined: ${data.agent} [Role: ${data.role}]`);
+                addLog(`🤖 Agent ${data.agent} joined the network`, 'success');
+            } else {
+                console.log(`💓 Agent heartbeat: ${data.agent} [Active: ${data.active}]`);
+            }
         }
     });
 
@@ -104,13 +133,28 @@ function subscribeToNetwork() {
         elements.connectionStatus.textContent = 'Connected';
         elements.connectionStatus.classList.add('connected');
         elements.peerCount.textContent = `Peers: ${peerCount}`;
+        console.log(`🌐 Connected to peer:`, peer);
+        console.log(`📊 Total peers connected: ${peerCount}`);
         addLog(`🌐 Connected to peer network`, 'success');
     });
 
     gun.on('bye', peer => {
         peerCount = Math.max(0, peerCount - 1);
         elements.peerCount.textContent = `Peers: ${peerCount}`;
+        console.log(`👋 Peer disconnected:`, peer);
+        console.log(`📊 Total peers connected: ${peerCount}`);
     });
+    
+    // Additional Gun.js event logging
+    gun.on('create', soul => {
+        console.log('📝 Gun.js CREATE event:', soul);
+    });
+    
+    gun.on('auth', ack => {
+        console.log('🔐 Gun.js AUTH event:', ack);
+    });
+    
+    console.log('✅ Subscription setup complete - waiting for P2P data...');
 }
 
 // Render active agents
