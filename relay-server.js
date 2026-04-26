@@ -25,6 +25,7 @@
  */
 
 import Gun from 'gun';
+import 'gun/sea.js';
 import express from 'express';
 import { createServer } from 'http';
 import helmet from 'helmet';
@@ -42,14 +43,49 @@ const __dirname = dirname(__filename);
 
 // Configuration
 const PORT = process.env.PORT || 8765;
-const API_KEYS = process.env.API_KEYS ? process.env.API_KEYS.split(',').map(k => k.trim()) : ['dev-key-123'];
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS 
-    ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()) 
+const ALLOW_DEV_KEYS = process.env.ALLOW_DEV_KEYS === '1';
+const RAW_API_KEYS = process.env.API_KEYS ? process.env.API_KEYS.split(',').map(k => k.trim()).filter(Boolean) : ['dev-key-123'];
+
+// Refuse to start with default/dev key in production unless explicitly opted in.
+const DEFAULT_KEYS = new Set(['dev-key-123', 'your-production-key-here']);
+const hasDefaultKey = RAW_API_KEYS.some(k => DEFAULT_KEYS.has(k));
+if (hasDefaultKey && !ALLOW_DEV_KEYS) {
+    console.error('❌ Refusing to start: API_KEYS contains a default/example key. Set API_KEYS to a real value, or set ALLOW_DEV_KEYS=1 for local development only.');
+    process.exit(1);
+}
+
+// O(1) lookup; mutated when registration system issues new keys.
+const API_KEYS = new Set(RAW_API_KEYS);
+
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean)
     : ['https://vishalmysore.github.io', 'http://localhost:3000', 'http://localhost:5173'];
+const ALLOWED_ORIGINS_SET = new Set(ALLOWED_ORIGINS);
 const MAX_CONNECTIONS = parseInt(process.env.MAX_CONNECTIONS || '500');
 const MAX_CONNECTIONS_PER_IP = parseInt(process.env.MAX_CONNECTIONS_PER_IP || '5');
 const RATE_LIMIT_WINDOW = parseInt(process.env.RATE_LIMIT_WINDOW || '1');
 const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || '100');
+
+// Constant-time API key check. Falls back to includes() only when lengths differ
+// (which leaks length but not key bytes); the Set check above already short-circuits
+// the common reject path without comparing strings.
+function isValidAPIKey(presented) {
+    if (typeof presented !== 'string' || presented.length === 0) return false;
+    if (!API_KEYS.has(presented)) return false;
+    // Re-confirm with constant-time comparison against the matching stored key
+    // to avoid timing differences from Set's internal hashing.
+    const presentedBuf = Buffer.from(presented);
+    for (const stored of API_KEYS) {
+        if (stored.length !== presented.length) continue;
+        const storedBuf = Buffer.from(stored);
+        try {
+            if (crypto.timingSafeEqual(presentedBuf, storedBuf)) return true;
+        } catch {
+            // length mismatch (race with Set mutation) — skip
+        }
+    }
+    return false;
+}
 
 // Metrics tracking
 const metrics = {
@@ -183,11 +219,9 @@ const registrationSystem = {
         }
         const apiKey = this.generateAPIKey();
         this.issuedKeys.set(agentPubKey, apiKey);
-        
-        // Add to valid API_KEYS list
-        if (!API_KEYS.includes(apiKey)) {
-            API_KEYS.push(apiKey);
-        }
+
+        // Add to valid API_KEYS set
+        API_KEYS.add(apiKey);
         
         logSecurity('API_KEY_ISSUED', { 
             agentPubKey: agentPubKey.substring(0, 16) + '...', 
@@ -264,18 +298,15 @@ app.use(helmet({
     crossOriginEmbedderPolicy: false
 }));
 
-// CORS configuration
+// CORS configuration — exact origin match (Origin header has no path).
+// `startsWith` was unsafe: `https://github.io.evil.com` would match
+// the prefix `https://github.io`.
 app.use(cors({
     origin: (origin, callback) => {
         // Allow requests with no origin (mobile apps, Postman, etc.)
         if (!origin) return callback(null, true);
-        
-        // Check if origin is allowed
-        const isAllowed = ALLOWED_ORIGINS.some(allowed => {
-            return origin.startsWith(allowed);
-        });
-        
-        if (isAllowed) {
+
+        if (ALLOWED_ORIGINS_SET.has(origin)) {
             callback(null, true);
         } else {
             metrics.blockedOrigins++;
@@ -322,19 +353,22 @@ function authenticateAPIKey(req, res, next) {
         return res.status(401).json({ error: 'API key required' });
     }
     
-    if (!API_KEYS.includes(apiKey)) {
+    if (!isValidAPIKey(apiKey)) {
         metrics.blockedAuth++;
-        logSecurity('INVALID_API_KEY', { 
-            ip: getClientIP(req), 
-            key: apiKey.substring(0, 8) + '...', 
-            timestamp: new Date().toISOString() 
+        logSecurity('INVALID_API_KEY', {
+            ip: getClientIP(req),
+            key: apiKey.substring(0, 8) + '...',
+            timestamp: new Date().toISOString()
         });
         return res.status(403).json({ error: 'Invalid API key' });
     }
-    
+
+    // /quota is a read-only check; don't charge a quota point to inspect quota.
+    const isQuotaCheck = req.path === '/quota' || req.originalUrl.startsWith('/quota');
+
     // Check per-key daily message limit (per key+IP combination)
     const ip = getClientIP(req);
-    if (!keyRateLimits.canSendMessage(apiKey, ip)) {
+    if (!isQuotaCheck && !keyRateLimits.canSendMessage(apiKey, ip)) {
         const tier = keyRateLimits.getTier(apiKey);
         const compositeKey = keyRateLimits.getCompositeKey(apiKey, ip);
         metrics.rateLimitHits++;
@@ -353,12 +387,14 @@ function authenticateAPIKey(req, res, next) {
         });
     }
     
-    // Increment message count
-    keyRateLimits.incrementCount(apiKey, ip);
-    
+    // Increment message count (skipped for read-only quota check above).
+    if (!isQuotaCheck) {
+        keyRateLimits.incrementCount(apiKey, ip);
+    }
+
     // Store key in request for later use
     req.apiKey = apiKey;
-    
+
     next();
 }
 
@@ -437,7 +473,7 @@ app.get('/', (req, res) => {
 
 // Agent Registration Endpoint
 // POST /register - Submit validation proofs to get API key
-app.post('/register', express.json(), limiter, (req, res) => {
+app.post('/register', express.json(), limiter, async (req, res) => {
     const { agentName, agentPubKey, registrationId, validations } = req.body;
     
     // Validate request
@@ -466,27 +502,75 @@ app.post('/register', express.json(), limiter, (req, res) => {
         });
     }
     
-    // Verify validations are from different IPs/networks
+    // Verify validations are from different IPs/networks AND have a valid
+    // SEA signature on the challenge solution. Without signature checks the
+    // entire validation array is client-supplied and trivially forgeable;
+    // see SECURITY.md for the remaining hardening required (e.g. server-side
+    // challenge issuance and validator-IP pinning).
     const validatorIPs = new Set();
+    const validatorPubKeys = new Set();
     for (const validation of validations) {
         if (!validation.validatorPubKey || !validation.validatorIP || !validation.challengeProof) {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 error: 'Invalid validation format',
                 validation
             });
         }
-        
+
+        // Reject duplicate validator pubkeys (single validator can't count thrice).
+        if (validatorPubKeys.has(validation.validatorPubKey)) {
+            return res.status(400).json({
+                error: 'Duplicate validator public key',
+                duplicatePubKey: validation.validatorPubKey.substring(0, 16) + '...'
+            });
+        }
+        validatorPubKeys.add(validation.validatorPubKey);
+
         // Check for duplicate validator IPs (Sybil attack prevention)
         if (validatorIPs.has(validation.validatorIP)) {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 error: 'Duplicate validator IPs detected - validations must come from different networks',
                 duplicateIP: validation.validatorIP
             });
         }
-        
         validatorIPs.add(validation.validatorIP);
+
+        // Verify the challenge proof: must include the challenge, the solution,
+        // and a signature over the solution by the claimed validator.
+        const proof = validation.challengeProof;
+        if (!proof || typeof proof !== 'object' || !proof.challenge || !proof.solution || !proof.signature) {
+            return res.status(400).json({
+                error: 'Invalid challengeProof: must include challenge, solution, and signature'
+            });
+        }
+
+        try {
+            // SEA.verify resolves to the signed payload object, or undefined on failure.
+            const payload = await Gun.SEA.verify(proof.signature, validation.validatorPubKey);
+            const looksValid = payload
+                && payload.registrationId === registrationId
+                && payload.agentPubKey === agentPubKey
+                && String(payload.solution) === String(proof.solution);
+
+            if (!looksValid) {
+                logSecurity('REGISTRATION_BAD_SIGNATURE', {
+                    agentPubKey: agentPubKey.substring(0, 16) + '...',
+                    validatorPubKey: validation.validatorPubKey.substring(0, 16) + '...',
+                    timestamp: new Date().toISOString()
+                });
+                return res.status(403).json({
+                    error: 'Invalid challenge proof signature'
+                });
+            }
+        } catch (err) {
+            logSecurity('REGISTRATION_VERIFY_ERROR', {
+                error: err.message,
+                timestamp: new Date().toISOString()
+            });
+            return res.status(403).json({ error: 'Challenge proof verification failed' });
+        }
     }
-    
+
     // All validations passed - issue API key
     const apiKey = registrationSystem.issueKey(agentPubKey);
     
@@ -697,11 +781,23 @@ const gun = Gun({
 // Track WebSocket connections with API key validation
 server.on('upgrade', (request, socket, head) => {
     const ip = getClientIP({ headers: request.headers, connection: socket });
-    
+
+    // Reject WS upgrades from disallowed origins. Browsers always send Origin
+    // on cross-origin WS handshakes; non-browser clients (CLI agents) typically
+    // omit it, which we still allow because the API key is the auth boundary.
+    const origin = request.headers.origin;
+    if (origin && !ALLOWED_ORIGINS_SET.has(origin)) {
+        metrics.blockedOrigins++;
+        logSecurity('WS_BLOCKED_ORIGIN', { ip, origin, timestamp: new Date().toISOString() });
+        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+        socket.destroy();
+        return;
+    }
+
     // Extract API key from query string or headers
     const url = new URL(request.url, `http://${request.headers.host}`);
     const apiKey = url.searchParams.get('key') || request.headers['x-api-key'];
-    
+
     // Validate API key for WebSocket connections
     if (!apiKey) {
         metrics.blockedAuth++;
@@ -710,13 +806,13 @@ server.on('upgrade', (request, socket, head) => {
         socket.destroy();
         return;
     }
-    
-    if (!API_KEYS.includes(apiKey)) {
+
+    if (!isValidAPIKey(apiKey)) {
         metrics.blockedAuth++;
-        logSecurity('WS_INVALID_API_KEY', { 
-            ip, 
-            key: apiKey.substring(0, 8) + '...', 
-            timestamp: new Date().toISOString() 
+        logSecurity('WS_INVALID_API_KEY', {
+            ip,
+            key: apiKey.substring(0, 8) + '...',
+            timestamp: new Date().toISOString()
         });
         socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
         socket.destroy();
@@ -810,7 +906,7 @@ server.listen(PORT, () => {
 📊 Metrics:          http://localhost:${PORT}/metrics
 
 🔐 Security Features Enabled:
-   ✓ API Key Authentication (${API_KEYS.length} keys configured)
+   ✓ API Key Authentication (${API_KEYS.size} keys configured)
    ✓ Origin Validation (${ALLOWED_ORIGINS.length} origins allowed)
    ✓ Rate Limiting (${RATE_LIMIT_MAX} req/${RATE_LIMIT_WINDOW}min)
    ✓ Connection Throttling (${MAX_CONNECTIONS_PER_IP}/IP, ${MAX_CONNECTIONS} global)
@@ -821,8 +917,8 @@ server.listen(PORT, () => {
 🛑 Press Ctrl+C to stop the server.
     `);
     
-    if (API_KEYS.includes('dev-key-123')) {
-        console.log('\n⚠️  WARNING: Using default API key! Set API_KEYS environment variable for production.\n');
+    if (ALLOW_DEV_KEYS && hasDefaultKey) {
+        console.log('\n⚠️  WARNING: Default API key in use (ALLOW_DEV_KEYS=1). NEVER use this in production.\n');
     }
 });
 
