@@ -55,6 +55,9 @@ if (hasDefaultKey && !ALLOW_DEV_KEYS) {
 }
 
 // O(1) lookup; mutated when registration system issues new keys.
+// HTTP auth and WS upgrade both do an O(1) `.has()` here instead of an
+// O(n) `Array.includes()` on every request. (`isValidAPIKey` below adds
+// a constant-time confirmation pass.)
 const API_KEYS = new Set(RAW_API_KEYS);
 
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
@@ -220,7 +223,7 @@ const registrationSystem = {
         const apiKey = this.generateAPIKey();
         this.issuedKeys.set(agentPubKey, apiKey);
 
-        // Add to valid API_KEYS set
+        // Add to valid API_KEYS set (O(1) lookup at auth time)
         API_KEYS.add(apiKey);
         
         logSecurity('API_KEY_ISSUED', { 
@@ -289,6 +292,34 @@ const registrationSystem = {
 // Cleanup expired registrations every minute
 setInterval(() => registrationSystem.cleanupExpired(), 60000);
 
+// Periodic cleanup for in-memory Maps that grow unbounded under churn:
+//   - keyRateLimits.messageCounts: one entry per (apiKey, ip) pair, never freed.
+//   - metrics.connectionsByIP: relies on every WS 'close' firing exactly once;
+//     occasional missed closes leak entries (esp. behind reverse proxies).
+// We sweep entries that are clearly stale: counters past their reset window
+// AND not used recently, plus IP buckets that have dropped to zero.
+setInterval(() => {
+    const now = Date.now();
+    let purged = 0;
+    for (const [key, counter] of keyRateLimits.messageCounts) {
+        // After the counter's reset time has passed, the entry is equivalent to
+        // a fresh one (limit fully restored), so dropping it is safe.
+        if (now >= counter.resetTime) {
+            keyRateLimits.messageCounts.delete(key);
+            purged++;
+        }
+    }
+    for (const [ip, count] of metrics.connectionsByIP) {
+        if (count <= 0) {
+            metrics.connectionsByIP.delete(ip);
+            purged++;
+        }
+    }
+    if (purged > 0) {
+        console.log(`🧹 [CLEANUP] Purged ${purged} stale rate-limit / connection entries`);
+    }
+}, 5 * 60 * 1000); // every 5 minutes
+
 // Express app setup
 const app = express();
 
@@ -352,7 +383,7 @@ function authenticateAPIKey(req, res, next) {
         });
         return res.status(401).json({ error: 'API key required' });
     }
-    
+
     if (!isValidAPIKey(apiKey)) {
         metrics.blockedAuth++;
         logSecurity('INVALID_API_KEY', {
@@ -916,7 +947,7 @@ server.listen(PORT, () => {
 📡 Agents can now connect and sync through this relay.
 🛑 Press Ctrl+C to stop the server.
     `);
-    
+
     if (ALLOW_DEV_KEYS && hasDefaultKey) {
         console.log('\n⚠️  WARNING: Default API key in use (ALLOW_DEV_KEYS=1). NEVER use this in production.\n');
     }
