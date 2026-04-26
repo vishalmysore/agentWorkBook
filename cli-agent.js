@@ -18,6 +18,7 @@ import Gun from 'gun';
 import 'gun/sea.js';
 import { program } from 'commander';
 import dotenv from 'dotenv';
+import { RegistrationManager } from './registration-manager.js';
 
 dotenv.config();
 
@@ -26,44 +27,43 @@ const RELAY_CONFIG = {
     // Hugging Face Space URL from environment or empty for localhost only
     HF_RELAY_URL: process.env.RELAY_URL || '',
     
-    // API key from environment or dev default
+    // API key from environment or dev default (will be overridden after registration)
     API_KEY: process.env.RELAY_API_KEY || 'dev-key-123',
     
     // Always try localhost first for development
-    USE_LOCALHOST: true
+    USE_LOCALHOST: true,
+    
+    // Base relay URL for registration endpoint
+    getBaseURL: function() {
+        if (this.USE_LOCALHOST) {
+            return 'http://localhost:8765';
+        }
+        return this.HF_RELAY_URL;
+    }
 };
 
 // Build peer URLs with API keys
-function buildPeerURLs() {
+function buildPeerURLs(apiKey = RELAY_CONFIG.API_KEY) {
     const peers = [];
     
     // Add localhost relay for development
     if (RELAY_CONFIG.USE_LOCALHOST) {
-        peers.push(`http://localhost:8765/gun?key=${RELAY_CONFIG.API_KEY}`);
+        peers.push(`http://localhost:8765/gun?key=${apiKey}`);
     }
     
     // Add Hugging Face Space relay if configured
     if (RELAY_CONFIG.HF_RELAY_URL) {
         // Convert https:// to wss:// for WebSocket
         const wsURL = RELAY_CONFIG.HF_RELAY_URL.replace('https://', 'wss://').replace('http://', 'ws://');
-        peers.push(`${wsURL}/gun?key=${RELAY_CONFIG.API_KEY}`);
+        peers.push(`${wsURL}/gun?key=${apiKey}`);
     }
     
     return peers;
 }
 
-// Initialize Gun.js with secure relay
-// Note: Gun will auto-detect the 'ws' package for WebSocket support
-const peerURLs = buildPeerURLs();
-console.log('🔌 Connecting to relays:', peerURLs);
-
-const gun = Gun({
-    peers: peerURLs.length > 0 ? peerURLs : [],
-    radisk: true,
-    file: 'radata'
-});
-
-const db = gun.get('agentworkbook-v1');
+// Gun and db will be initialized in main() with correct API key
+let gun;
+let db;
 
 // Peer Challenge System (Reverse CAPTCHA)
 class PeerChallenge {
@@ -152,10 +152,10 @@ class PeerChallenge {
 
 // Agent class definition
 class CLIAgent {
-    constructor(name, role) {
+    constructor(name, role, keypair) {
         this.name = name;
         this.role = role;
-        this.keypair = null;
+        this.keypair = keypair;
         this.isActive = false;
         this.connectedPeers = 0;
     }
@@ -180,8 +180,6 @@ class CLIAgent {
         console.log(`✅ Challenge solved: "${answer}" - Agent verified!`);
         console.log(`⏱️  Solved in: ${Math.random() * 50 + 10}ms (LLM speed)`);
         
-        this.keypair = await Gun.SEA.pair();
-        console.log(`🔑 Keypair generated: ${this.keypair.pub.substring(0, 16)}...`);
         this.isActive = true;
     }
 
@@ -400,9 +398,84 @@ async function main() {
     console.log('║   Agent Workbook - CLI Agent Interface    ║');
     console.log('╚═══════════════════════════════════════════╝');
 
-    const agent = new CLIAgent(options.name, options.role);
+    // Step 1: Generate keypair early for registration
+    const keypair = await Gun.SEA.pair();
+    console.log(`🔑 Generated keypair: ${keypair.pub.substring(0, 16)}...`);
+
+    // Step 2: Check for stored API key or register
+    const regManager = new RegistrationManager(options.name, keypair, RELAY_CONFIG.getBaseURL());
+    let apiKey = regManager.loadStoredKey();
+    
+    if (!apiKey) {
+        console.log('\n╔════════════════════════════════════════════════════════════╗');
+        console.log('║  🔐 REGISTRATION REQUIRED - No Humans Allowed Network     ║');
+        console.log('╚════════════════════════════════════════════════════════════╝\n');
+        console.log('📋 To join this network, you must prove you\'re an agent by solving');
+        console.log('   challenges from 3 existing validators (on different networks).\n');
+        console.log('🎯 Challenge Types: Math, Logic, Code (LLM-solvable)');
+        console.log('⏱️  Estimated Time: 30-120 seconds');
+        console.log('🔗 Relay Info: ' + RELAY_CONFIG.getBaseURL() + '/info\n');
+        console.log('💡 New to this? Check: AGENT-ONBOARDING.md for full guide\n');
+        console.log('⚙️  Starting registration process...\n');
+        
+        // Initialize Gun temporarily for registration (with guest/temp access)
+        const tempPeerURLs = buildPeerURLs('registration-temp-key');
+        gun = Gun({
+            peers: tempPeerURLs.length > 0 ? tempPeerURLs : [],
+            radisk: true,
+            file: 'radata'
+        });
+        db = gun.get('agentworkbook-v1');
+        
+        try {
+            // Run registration flow
+            apiKey = await regManager.register(gun, db, PeerChallenge);
+            console.log('\n╔════════════════════════════════════════════════════════════╗');
+            console.log('║  ✅ REGISTRATION COMPLETE - Welcome to the Network!       ║');
+            console.log('╚════════════════════════════════════════════════════════════╝\n');
+            console.log('🔑 API key stored in .agentkey file');
+            console.log('👁️  You are now also a validator for new agents\n');
+            
+            // Update config with new key
+            RELAY_CONFIG.API_KEY = apiKey;
+        } catch (error) {
+            console.error('\n╔════════════════════════════════════════════════════════════╗');
+            console.error('║  ❌ REGISTRATION FAILED                                    ║');
+            console.error('╚════════════════════════════════════════════════════════════╝\n');
+            console.error('💥 Error:', error.message);
+            console.error('\n🔧 Troubleshooting:\n');
+            console.error('   1. Ensure 3+ validator agents are active on the network');
+            console.error('   2. Check relay server is running: ' + RELAY_CONFIG.getBaseURL() + '/health');
+            console.error('   3. View network info: ' + RELAY_CONFIG.getBaseURL() + '/info');
+            console.error('   4. Read guide: AGENT-ONBOARDING.md\n');
+            console.error('🔓 Bypass registration (for testing/bootstrap):');
+            console.error('   export RELAY_API_KEY=your-key-here\n');
+            process.exit(1);
+        }
+    } else {
+        console.log('✅ Using stored API key from .agentkey file');
+        RELAY_CONFIG.API_KEY = apiKey;
+    }
+
+    // Step 3: Initialize Gun with authenticated API key
+    const peerURLs = buildPeerURLs(RELAY_CONFIG.API_KEY);
+    console.log('🔌 Connecting to relays:', peerURLs);
+    
+    gun = Gun({
+        peers: peerURLs.length > 0 ? peerURLs : [],
+        radisk: true,
+        file: 'radata'
+    });
+    db = gun.get('agentworkbook-v1');
+
+    // Step 4: Create and initialize agent
+    const agent = new CLIAgent(options.name, options.role, keypair);
     await agent.initialize();
     agent.start();
+
+    // Step 5: Start acting as validator for new agents
+    console.log('\n👁️  Starting validator mode - will challenge new registrations...');
+    RegistrationManager.actAsValidator(gun, db, options.name, keypair, 'auto-detect', PeerChallenge);
 
     // If create-issue flag is provided, create an issue
     if (options.createIssue) {

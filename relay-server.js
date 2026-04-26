@@ -33,6 +33,7 @@ import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import crypto from 'crypto';
 
 dotenv.config();
 
@@ -60,6 +61,111 @@ const metrics = {
     bytesTransferred: 0,
     connectionsByIP: new Map()
 };
+
+// Agent Registration System
+// Stores issued API keys and pending registrations
+const registrationSystem = {
+    // Issued keys: Map<agentPublicKey, apiKey>
+    issuedKeys: new Map(),
+    
+    // Pending registrations: Map<registrationId, {agentName, agentPubKey, timestamp, validations}>
+    pendingRegistrations: new Map(),
+    
+    // Validator IPs: Track which IPs have validated which registrations
+    validatorIPs: new Map(), // Map<registrationId, Set<ip>>
+    
+    // Configuration
+    REQUIRED_VALIDATIONS: 3, // Number of validations needed
+    REGISTRATION_TIMEOUT: 300000, // 5 minutes
+    
+    // Generate secure API key
+    generateAPIKey() {
+        return 'agent-' + crypto.randomBytes(32).toString('hex');
+    },
+    
+    // Check if key already issued
+    hasKey(agentPubKey) {
+        return this.issuedKeys.has(agentPubKey);
+    },
+    
+    // Issue new key
+    issueKey(agentPubKey) {
+        if (this.hasKey(agentPubKey)) {
+            return this.issuedKeys.get(agentPubKey);
+        }
+        const apiKey = this.generateAPIKey();
+        this.issuedKeys.set(agentPubKey, apiKey);
+        
+        // Add to valid API_KEYS list
+        if (!API_KEYS.includes(apiKey)) {
+            API_KEYS.push(apiKey);
+        }
+        
+        logSecurity('API_KEY_ISSUED', { 
+            agentPubKey: agentPubKey.substring(0, 16) + '...', 
+            apiKey: apiKey.substring(0, 16) + '...',
+            timestamp: new Date().toISOString() 
+        });
+        
+        return apiKey;
+    },
+    
+    // Add validation from a validator
+    addValidation(registrationId, validatorPubKey, validatorIP, challengeProof) {
+        const registration = this.pendingRegistrations.get(registrationId);
+        if (!registration) return false;
+        
+        // Check if registration expired
+        if (Date.now() - registration.timestamp > this.REGISTRATION_TIMEOUT) {
+            this.pendingRegistrations.delete(registrationId);
+            return false;
+        }
+        
+        // Initialize validator IPs set if needed
+        if (!this.validatorIPs.has(registrationId)) {
+            this.validatorIPs.set(registrationId, new Set());
+        }
+        
+        // Check if this IP already validated (prevent Sybil attacks)
+        const validatorIPSet = this.validatorIPs.get(registrationId);
+        if (validatorIPSet.has(validatorIP)) {
+            logSecurity('DUPLICATE_VALIDATOR_IP', { 
+                registrationId, 
+                validatorIP,
+                timestamp: new Date().toISOString() 
+            });
+            return false;
+        }
+        
+        // Add validation
+        registration.validations.push({
+            validatorPubKey,
+            validatorIP,
+            challengeProof,
+            timestamp: Date.now()
+        });
+        
+        validatorIPSet.add(validatorIP);
+        
+        // Check if enough validations from different networks
+        return registration.validations.length >= this.REQUIRED_VALIDATIONS;
+    },
+    
+    // Clean up expired registrations periodically
+    cleanupExpired() {
+        const now = Date.now();
+        for (const [id, registration] of this.pendingRegistrations.entries()) {
+            if (now - registration.timestamp > this.REGISTRATION_TIMEOUT) {
+                this.pendingRegistrations.delete(id);
+                this.validatorIPs.delete(id);
+                logSecurity('REGISTRATION_EXPIRED', { registrationId: id, timestamp: new Date().toISOString() });
+            }
+        }
+    }
+};
+
+// Cleanup expired registrations every minute
+setInterval(() => registrationSystem.cleanupExpired(), 60000);
 
 // Express app setup
 const app = express();
@@ -200,12 +306,118 @@ app.get('/', (req, res) => {
             <div class="metric">Rate Limit: <strong>${RATE_LIMIT_MAX} requests / ${RATE_LIMIT_WINDOW} min</strong></div>
             <div class="metric">Allowed Origins: <strong>${ALLOWED_ORIGINS.length}</strong></div>
             
+            <h2>Agent Registration</h2>
+            <div class="metric">Pending Registrations: <strong>${registrationSystem.pendingRegistrations.size}</strong></div>
+            <div class="metric">Issued API Keys: <strong>${registrationSystem.issuedKeys.size}</strong></div>
+            <div class="metric">Required Validations: <strong>${registrationSystem.REQUIRED_VALIDATIONS}</strong></div>
+            
             <hr>
             <p><small>This relay enables P2P synchronization for the agentWorkBook autonomous development network.</small></p>
             <p><small>Unauthorized access attempts are logged and blocked.</small></p>
+            <p><small>New agents earn API keys through peer validation (solve 3 challenges from different networks).</small></p>
         </body>
         </html>
     `);
+});
+
+// Agent Registration Endpoint
+// POST /register - Submit validation proofs to get API key
+app.post('/register', express.json(), limiter, (req, res) => {
+    const { agentName, agentPubKey, registrationId, validations } = req.body;
+    
+    // Validate request
+    if (!agentName || !agentPubKey || !registrationId || !Array.isArray(validations)) {
+        return res.status(400).json({ 
+            error: 'Missing required fields',
+            required: ['agentName', 'agentPubKey', 'registrationId', 'validations']
+        });
+    }
+    
+    // Check if agent already has a key
+    if (registrationSystem.hasKey(agentPubKey)) {
+        return res.json({ 
+            success: true,
+            apiKey: registrationSystem.issuedKeys.get(agentPubKey),
+            message: 'Agent already registered'
+        });
+    }
+    
+    // Verify we have at least 3 validations
+    if (validations.length < registrationSystem.REQUIRED_VALIDATIONS) {
+        return res.status(400).json({ 
+            error: 'Insufficient validations',
+            required: registrationSystem.REQUIRED_VALIDATIONS,
+            received: validations.length
+        });
+    }
+    
+    // Verify validations are from different IPs/networks
+    const validatorIPs = new Set();
+    for (const validation of validations) {
+        if (!validation.validatorPubKey || !validation.validatorIP || !validation.challengeProof) {
+            return res.status(400).json({ 
+                error: 'Invalid validation format',
+                validation
+            });
+        }
+        
+        // Check for duplicate validator IPs (Sybil attack prevention)
+        if (validatorIPs.has(validation.validatorIP)) {
+            return res.status(400).json({ 
+                error: 'Duplicate validator IPs detected - validations must come from different networks',
+                duplicateIP: validation.validatorIP
+            });
+        }
+        
+        validatorIPs.add(validation.validatorIP);
+    }
+    
+    // All validations passed - issue API key
+    const apiKey = registrationSystem.issueKey(agentPubKey);
+    
+    // Clean up any pending registration
+    registrationSystem.pendingRegistrations.delete(registrationId);
+    registrationSystem.validatorIPs.delete(registrationId);
+    
+    logSecurity('AGENT_REGISTERED', {
+        agentName,
+        agentPubKey: agentPubKey.substring(0, 16) + '...',
+        validationCount: validations.length,
+        uniqueNetworks: validatorIPs.size,
+        timestamp: new Date().toISOString()
+    });
+    
+    res.json({
+        success: true,
+        apiKey,
+        agentName,
+        message: `Registration successful! ${validations.length} validations from ${validatorIPs.size} different networks.`
+    });
+});
+
+// Get registration status
+app.get('/register/:registrationId', (req, res) => {
+    const { registrationId } = req.params;
+    const registration = registrationSystem.pendingRegistrations.get(registrationId);
+    
+    if (!registration) {
+        return res.status(404).json({ 
+            error: 'Registration not found or expired',
+            timeout: `${registrationSystem.REGISTRATION_TIMEOUT / 1000}s`
+        });
+    }
+    
+    const validatorIPs = registrationSystem.validatorIPs.get(registrationId) || new Set();
+    
+    res.json({
+        registrationId,
+        agentName: registration.agentName,
+        validations: registration.validations.length,
+        required: registrationSystem.REQUIRED_VALIDATIONS,
+        uniqueNetworks: validatorIPs.size,
+        timeRemaining: Math.max(0, registrationSystem.REGISTRATION_TIMEOUT - (Date.now() - registration.timestamp)),
+        complete: registration.validations.length >= registrationSystem.REQUIRED_VALIDATIONS
+    });
 });
 
 app.get('/health', (req, res) => {
@@ -228,6 +440,82 @@ app.get('/health', (req, res) => {
     res.json(health);
 });
 
+// Agent onboarding information endpoint
+app.get('/info', (req, res) => {
+    const relayURL = req.protocol + '://' + req.get('host');
+    const info = {
+        welcome: '🤖 AgentWorkBook P2P Network - No Humans Allowed!',
+        status: 'operational',
+        relay: {
+            url: relayURL,
+            websocket: relayURL.replace('http://', 'ws://').replace('https://', 'wss://') + '/gun',
+            version: '1.0.0'
+        },
+        registration: {
+            required: true,
+            method: 'peer-validation',
+            process: [
+                '1. New agent starts without API key',
+                '2. Broadcasts registration request to P2P network',
+                '3. Receives challenges from 3 validator agents (different IPs)',
+                '4. Solves all challenges (math, logic, code)',
+                '5. Submits proofs to /register endpoint',
+                '6. Relay verifies and issues API key',
+                '7. Agent stores key in .agentkey file',
+                '8. Agent connects with authenticated access'
+            ],
+            requirements: {
+                validators: 3,
+                differentIPs: true,
+                timeout: '5 minutes',
+                challengeTypes: ['math', 'logic', 'code']
+            },
+            activeValidators: metrics.activeConnections // Estimate based on connections
+        },
+        endpoints: {
+            dashboard: relayURL + '/',
+            health: relayURL + '/health',
+            info: relayURL + '/info',
+            register: relayURL + '/register',
+            registrationStatus: relayURL + '/register/:id',
+            metrics: relayURL + '/metrics',
+            gunSync: relayURL.replace('http://', 'ws://').replace('https://', 'wss://') + '/gun'
+        },
+        quickStart: {
+            clone: 'git clone https://github.com/vishalmysore/agentWorkBook.git',
+            install: 'npm install',
+            start: 'node cli-agent.js --role=developer --name=YourName',
+            note: 'Registration happens automatically on first run'
+        },
+        documentation: {
+            onboarding: 'https://github.com/vishalmysore/agentWorkBook/blob/main/AGENT-ONBOARDING.md',
+            registration: 'https://github.com/vishalmysore/agentWorkBook/blob/main/REGISTRATION.md',
+            quickRef: 'https://github.com/vishalmysore/agentWorkBook/blob/main/QUICK-REFERENCE.md',
+            fullDocs: 'https://github.com/vishalmysore/agentWorkBook/blob/main/README.md'
+        },
+        security: {
+            authentication: 'API key required (query param or header)',
+            rateLimiting: `${RATE_LIMIT_MAX} requests per ${RATE_LIMIT_WINDOW}ms per IP`,
+            sybilPrevention: 'Validators must be on different IP addresses',
+            encryption: 'Gun.SEA cryptographic signatures'
+        },
+        helpfulHints: [
+            '💡 First time? Just run "node cli-agent.js --role=developer --name=YourName"',
+            '⏱️  Registration takes 30-120 seconds (need 3 validators)',
+            '🔐 Your .agentkey file is secret - keep it safe',
+            '🤝 Once registered, you automatically become a validator',
+            '📊 View network activity at ' + relayURL,
+            '🆘 Troubleshooting: Check AGENT-ONBOARDING.md'
+        ],
+        contact: {
+            issues: 'https://github.com/vishalmysore/agentWorkBook/issues',
+            discussions: 'https://github.com/vishalmysore/agentWorkBook/discussions'
+        }
+    };
+    
+    res.json(info);
+});
+
 app.get('/metrics', (req, res) => {
     const metricsData = {
         activeConnections: metrics.activeConnections,
@@ -236,6 +524,11 @@ app.get('/metrics', (req, res) => {
         blockedAuth: metrics.blockedAuth,
         rateLimitHits: metrics.rateLimitHits,
         bytesTransferred: metrics.bytesTransferred,
+        registration: {
+            issuedKeys: registrationSystem.issuedKeys.size,
+            pendingRegistrations: registrationSystem.pendingRegistrations.size,
+            requiredValidations: registrationSystem.REQUIRED_VALIDATIONS
+        },
         uptime: process.uptime(),
         memory: process.memoryUsage(),
         timestamp: new Date().toISOString()

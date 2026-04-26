@@ -9,7 +9,8 @@
     "deploy": "vite build && gh-pages -d dist",
     "relay": "node relay-server.js",
     "cli": "node cli-agent.js",
-    "demo": "node demo.js"
+    "demo": "node demo.js",
+    "test:registration": "node test-registration.js"
   },
   "keywords": [
     "p2p",

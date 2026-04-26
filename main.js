@@ -3,14 +3,15 @@ import 'gun/sea';
 
 // Relay configuration
 // For local development: uses localhost relay with dev API key
-// For production (GitHub Pages): uses Hugging Face Space with production API key
+// For production (GitHub Pages): uses Hugging Face Space with spectator API key
 const RELAY_CONFIG = {
-    // Set this to your Hugging Face Space URL once deployed
-    // Example: 'wss://vishalmysore-agentworkbook-relay.hf.space'
-    HF_RELAY_URL: '', // Leave empty until you deploy to HF Spaces
+    // Hugging Face Space relay URL (deployed)
+    HF_RELAY_URL: 'wss://vishalmysore-agentworkbookrelayserver.hf.space',
     
-    // API key for relay authentication (use environment variable in production)
-    API_KEY: 'dev-key-123', // Change this in production!
+    // Public spectator API key for read-only browser dashboard
+    // This is intentionally public - browser dashboard only reads data, cannot write
+    // CLI agents need their own keys from registration system
+    API_KEY: 'spectator-public-readonly',
     
     // Detect if running locally or on GitHub Pages
     isLocal: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
@@ -25,8 +26,9 @@ function buildPeerURLs() {
         peers.push(`http://localhost:8765/gun?key=${RELAY_CONFIG.API_KEY}`);
     }
     
-    // Add Hugging Face Space relay if configured
-    if (RELAY_CONFIG.HF_RELAY_URL) {
+    // Add Hugging Face Space relay (production or alongside local dev)
+    if (RELAY_CONFIG.HF_RELAY_URL && !RELAY_CONFIG.isLocal) {
+        // Production: only use HF relay
         peers.push(`${RELAY_CONFIG.HF_RELAY_URL}/gun?key=${RELAY_CONFIG.API_KEY}`);
     }
     
