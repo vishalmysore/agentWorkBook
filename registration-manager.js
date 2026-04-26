@@ -225,17 +225,74 @@ export class RegistrationManager {
     static async actAsValidator(gun, db, agentName, keypair, validatorIP, PeerChallenge) {
         console.log('👁️  Watching for new agent registrations to validate...');
         console.log(`🔍 Validator: ${agentName} (${keypair.pub.substring(0, 16)}...)`);
-        console.log(`📡 Listening on: registrations/*\n`);
+        console.log(`📡 Listening on: registrations/*`);
+        console.log(`🔄 Active polling enabled (every 10 seconds)\n`);
         
+        const processedRegistrations = new Set();
+        
+        // Active polling (Gun.js .map().on() doesn't reliably work over relays)
+        const pollRegistrations = async () => {
+            console.log(`[POLL] Checking for new registrations...`);
+            
+            db.get('registrations').once(async (registrations) => {
+                if (!registrations) {
+                    console.log(`[POLL] No registrations node found`);
+                    return;
+                }
+                
+                const regIds = Object.keys(registrations).filter(k => k !== '_');
+                console.log(`[POLL] Found ${regIds.length} registration(s): ${regIds.join(', ')}`);
+                
+                for (const registrationId of regIds) {
+                    const registrationData = registrations[registrationId];
+                    if (!registrationData || typeof registrationData !== 'object') continue;
+                    if (processedRegistrations.has(registrationId)) continue;
+                    
+                    console.log(`[POLL] Registration ${registrationId}:`, { 
+                        status: registrationData.status,
+                        agentName: registrationData.agentName,
+                        agentPubKey: registrationData.agentPubKey?.substring(0, 16) + '...'
+                    });
+                    
+                    if (registrationData.status === 'pending' && registrationData.agentPubKey) {
+                        await handleRegistration(registrationId, registrationData);
+                    }
+                }
+            });
+        };
+        
+        // Poll every 10 seconds
+        setInterval(pollRegistrations, 10000);
+        pollRegistrations(); // Initial poll
+        
+        // Also keep .map().on() as backup
         db.get('registrations').map().on(async (registrationData, registrationId) => {
-            console.log(`[DEBUG] Registration event received:`, { registrationId, hasData: !!registrationData, status: registrationData?.status });
+            console.log(`[EVENT] Registration event:`, { registrationId, status: registrationData?.status });
             
             if (!registrationData || !registrationData.agentPubKey || registrationData.status !== 'pending') {
                 return;
             }
             
+            if (processedRegistrations.has(registrationId)) return;
+            await handleRegistration(registrationId, registrationData);
+        });
+        
+        async function handleRegistration(registrationId, registrationData) {
+            if (processedRegistrations.has(registrationId)) {
+                console.log(`   ⏭️  Already processed ${registrationId}`);
+                return;
+            }
+            processedRegistrations.add(registrationId);
+            
+            console.log(`\n🚨 NEW REGISTRATION DETECTED: ${registrationId}`);
+            console.log(`   Agent: ${registrationData.agentName}`);
+            console.log(`   PubKey: ${registrationData.agentPubKey.substring(0, 16)}...`);
+            
             // Don't validate our own registration
-            if (registrationData.agentPubKey === keypair.pub) return;
+            if (registrationData.agentPubKey === keypair.pub) {
+                console.log(`   ⏭️  Skipping own registration`);
+                return;
+            }
             
             // Check if we already issued a challenge for this registration
             const existingChallenge = await new Promise(resolve => {
@@ -244,11 +301,10 @@ export class RegistrationManager {
                 });
             });
             
-            if (existingChallenge) return; // Already challenged this one
-            
-            console.log(`\n🆕 New registration detected: ${registrationData.agentName}`);
-            console.log(`   Registration ID: ${registrationId}`);
-            console.log(`   Agent PubKey: ${registrationData.agentPubKey.substring(0, 16)}...`);
+            if (existingChallenge) {
+                console.log(`   ⏭️  Already challenged this registration`);
+                return;
+            }
             
             // Generate challenge
             const challenge = PeerChallenge.generate();
@@ -307,6 +363,6 @@ export class RegistrationManager {
                     console.log(`✅ Attestation signed for ${registrationData.agentName}`);
                 }
             });
-        });
+        }
     }
 }
