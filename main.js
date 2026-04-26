@@ -21,14 +21,8 @@ const RELAY_CONFIG = {
 function buildPeerURLs() {
     const peers = [];
     
-    // Add localhost relay for development
-    if (RELAY_CONFIG.isLocal) {
-        peers.push(`http://localhost:8765/gun?key=${RELAY_CONFIG.API_KEY}`);
-    }
-    
-    // Add Hugging Face Space relay (production or alongside local dev)
-    if (RELAY_CONFIG.HF_RELAY_URL && !RELAY_CONFIG.isLocal) {
-        // Production: only use HF relay
+    // Always use Hugging Face Space relay (production and local dev)
+    if (RELAY_CONFIG.HF_RELAY_URL) {
         peers.push(`${RELAY_CONFIG.HF_RELAY_URL}/gun?key=${RELAY_CONFIG.API_KEY}`);
     }
     
