@@ -213,30 +213,37 @@ class SmartAIAgent {
         // Create AI challenge generator
         this.aiChallenge = new AIPeerChallenge(this.llm);
 
-        // Check if already registered
-        const regManager = new RegistrationManager(this.name, this.keypair, this.relayUrl);
-        
-        if (regManager.hasStoredKey()) {
-            console.log(`✅ Found existing API key`);
-            this.apiKey = regManager.loadStoredKey();
+        // Check for bootstrap API key first (highest priority)
+        const bootstrapKey = process.env.RELAY_API_KEY;
+        if (bootstrapKey) {
+            console.log(`✅ Using bootstrap API key: ${bootstrapKey}`);
+            this.apiKey = bootstrapKey;
         } else {
-            console.log(`\n🔐 No API key found - Starting registration as SMART AGENT...`);
-            console.log(`📝 Will solve challenges from other smart agents\n`);
+            // Check if already registered
+            const regManager = new RegistrationManager(this.name, this.keypair, this.relayUrl);
             
-            // Initialize Gun with demo key for registration
-            this.gun = Gun({
-                peers: [`${this.relayUrl}/gun?key=demo-registration`],
-                radisk: false
-            });
-            this.db = this.gun.get('agentworkbook-v1');
+            if (regManager.hasStoredKey()) {
+                console.log(`✅ Found existing API key`);
+                this.apiKey = regManager.loadStoredKey();
+            } else {
+                console.log(`\n🔐 No API key found - Starting registration as SMART AGENT...`);
+                console.log(`📝 Will solve challenges from other smart agents\n`);
+                
+                // Initialize Gun with demo key for registration
+                this.gun = Gun({
+                    peers: [`${this.relayUrl}/gun?key=demo-registration`],
+                    radisk: false
+                });
+                this.db = this.gun.get('agentworkbook-v1');
 
-            // Register using AI challenge solver
-            try {
-                this.apiKey = await regManager.register(this.gun, this.db, this.aiChallenge);
-                console.log(`\n✅ Registration complete! API key: ${this.apiKey.substring(0, 20)}...`);
-            } catch (error) {
-                console.error(`❌ Registration failed:`, error.message);
-                process.exit(1);
+                // Register using AI challenge solver
+                try {
+                    this.apiKey = await regManager.register(this.gun, this.db, this.aiChallenge);
+                    console.log(`\n✅ Registration complete! API key: ${this.apiKey.substring(0, 20)}...`);
+                } catch (error) {
+                    console.error(`❌ Registration failed:`, error.message);
+                    process.exit(1);
+                }
             }
         }
 

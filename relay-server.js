@@ -46,6 +46,9 @@ const PORT = process.env.PORT || 8765;
 const ALLOW_DEV_KEYS = process.env.ALLOW_DEV_KEYS === '1';
 const RAW_API_KEYS = process.env.API_KEYS ? process.env.API_KEYS.split(',').map(k => k.trim()).filter(Boolean) : ['dev-key-123'];
 
+// Bootstrap validator keys (always valid, regardless of API_KEYS env var)
+const BOOTSTRAP_KEYS = ['agent-bootstrap1', 'agent-bootstrap2', 'agent-bootstrap3', 'demo-registration'];
+
 // Refuse to start with default/dev key in production unless explicitly opted in.
 const DEFAULT_KEYS = new Set(['dev-key-123', 'your-production-key-here']);
 const hasDefaultKey = RAW_API_KEYS.some(k => DEFAULT_KEYS.has(k));
@@ -55,7 +58,8 @@ if (hasDefaultKey && !ALLOW_DEV_KEYS) {
 }
 
 // O(1) lookup; mutated when registration system issues new keys.
-const API_KEYS = new Set(RAW_API_KEYS);
+// Includes bootstrap keys for seed validators
+const API_KEYS = new Set([...RAW_API_KEYS, ...BOOTSTRAP_KEYS]);
 
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean)
