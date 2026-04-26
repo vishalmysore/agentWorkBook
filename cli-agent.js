@@ -364,34 +364,42 @@ class CLIAgent {
             return;
         }
 
+        const tagsArray = Array.isArray(tags) ? tags : tags.split(',').map(t => t.trim());
+        const postId = Date.now();
+
         const post = {
-            id: Date.now(),
+            id: postId,
             type, // knowledge, status, article, announcement
             title,
             content,
-            tags: Array.isArray(tags) ? tags : tags.split(',').map(t => t.trim()),
+            tagsStr: tagsArray.join(','), // Store as string for Gun.js compatibility
             author: this.name,
             authorKey: this.keypair.pub,
             createdAt: new Date().toISOString(),
-            votes: {
-                up: [],
-                down: []
-            },
-            verifications: []
+            upvoteCount: 0,
+            downvoteCount: 0,
+            verifiedCount: 0
         };
 
         const signedPost = await this.signData(post);
 
-        db.get('knowledge-board').get(post.id.toString()).put({
+        // Store post with Gun.js-friendly structure
+        const postRef = db.get('knowledge-board').get(postId.toString());
+        postRef.put({
             ...post,
             signature: signedPost
         });
+
+        // Initialize empty vote sets (Gun.js sets, not arrays)
+        postRef.get('votes').get('up').put({});
+        postRef.get('votes').get('down').put({});
+        postRef.get('verifications').put({});
 
         console.log(`\n📢 Post created on Knowledge Board:`);
         console.log(`   Type: ${type}`);
         console.log(`   Title: "${title}"`);
         console.log(`   ID: #${post.id}`);
-        console.log(`   Tags: ${post.tags.join(', ')}\n`);
+        console.log(`   Tags: ${tagsArray.join(', ')}\n`);
     }
 
     async voteOnPost(postId, voteType) {
@@ -406,29 +414,29 @@ class CLIAgent {
                 return;
             }
 
-            const votes = post.votes || { up: [], down: [] };
-            const agentName = this.name;
+            const agentKey = this.keypair.pub;
+            const postRef = db.get('knowledge-board').get(postId.toString());
 
-            // Remove from opposite vote array if exists
+            // Add to the appropriate vote set and remove from opposite
             if (voteType === 'up') {
-                votes.down = (votes.down || []).filter(v => v !== agentName);
-                if (!votes.up.includes(agentName)) {
-                    votes.up.push(agentName);
-                    console.log(`👍 ${this.name} upvoted post #${postId}: "${post.title}"`);
-                } else {
-                    console.log(`   (Already upvoted)`);
-                }
+                postRef.get('votes').get('up').get(agentKey).put(true);
+                postRef.get('votes').get('down').get(agentKey).put(null); // Remove from downvotes
+                
+                // Update count
+                const newCount = (post.upvoteCount || 0) + 1;
+                postRef.get('upvoteCount').put(newCount);
+                
+                console.log(`👍 ${this.name} upvoted post #${postId}: "${post.title}"`);
             } else if (voteType === 'down') {
-                votes.up = (votes.up || []).filter(v => v !== agentName);
-                if (!votes.down.includes(agentName)) {
-                    votes.down.push(agentName);
-                    console.log(`👎 ${this.name} downvoted post #${postId}: "${post.title}"`);
-                } else {
-                    console.log(`   (Already downvoted)`);
-                }
+                postRef.get('votes').get('down').get(agentKey).put(true);
+                postRef.get('votes').get('up').get(agentKey).put(null); // Remove from upvotes
+                
+                // Update count
+                const newCount = (post.downvoteCount || 0) + 1;
+                postRef.get('downvoteCount').put(newCount);
+                
+                console.log(`👎 ${this.name} downvoted post #${postId}: "${post.title}"`);
             }
-
-            db.get('knowledge-board').get(postId.toString()).get('votes').put(votes);
         });
     }
 
@@ -444,6 +452,7 @@ class CLIAgent {
                 return;
             }
 
+            const verificationId = `${this.keypair.pub}_${Date.now()}`;
             const verification = {
                 agent: this.name,
                 agentKey: this.keypair.pub,
@@ -452,10 +461,15 @@ class CLIAgent {
                 timestamp: new Date().toISOString()
             };
 
-            const verifications = post.verifications || [];
-            verifications.push(verification);
+            // Store verification in Gun.js set
+            db.get('knowledge-board').get(postId.toString())
+                .get('verifications').get(verificationId).put(verification);
 
-            db.get('knowledge-board').get(postId.toString()).get('verifications').put(verifications);
+            // Update verified count
+            if (verified) {
+                const newCount = (post.verifiedCount || 0) + 1;
+                db.get('knowledge-board').get(postId.toString()).get('verifiedCount').put(newCount);
+            }
 
             console.log(`✅ ${this.name} verified post #${postId}: "${post.title}"`);
             console.log(`   Status: ${verified ? '✓ VERIFIED' : '✗ REJECTED'}`);
@@ -469,9 +483,9 @@ class CLIAgent {
         db.get('knowledge-board').map().on((post, key) => {
             if (post && post.id && post.authorKey !== this.keypair?.pub) {
                 const timestamp = new Date().toLocaleTimeString();
-                const upvotes = (post.votes?.up || []).length;
-                const downvotes = (post.votes?.down || []).length;
-                const verifiedCount = (post.verifications || []).filter(v => v.verified).length;
+                const upvotes = post.upvoteCount || 0;
+                const downvotes = post.downvoteCount || 0;
+                const verifiedCount = post.verifiedCount || 0;
                 
                 console.log(`\n[${timestamp}] 📬 Knowledge Board Update:`);
                 console.log(`   Type: ${post.type}`);
@@ -480,8 +494,8 @@ class CLIAgent {
                 console.log(`   ID: #${post.id}`);
                 console.log(`   Votes: 👍 ${upvotes} | 👎 ${downvotes}`);
                 console.log(`   Verified: ${verifiedCount} agents`);
-                if (post.tags && post.tags.length > 0) {
-                    console.log(`   Tags: ${post.tags.join(', ')}`);
+                if (post.tagsStr) {
+                    console.log(`   Tags: ${post.tagsStr}`);
                 }
             }
         });
@@ -495,10 +509,10 @@ class CLIAgent {
             if (post && post.id) {
                 if (filterType && post.type !== filterType) return;
                 
-                const upvotes = (post.votes?.up || []).length;
-                const downvotes = (post.votes?.down || []).length;
+                const upvotes = post.upvoteCount || 0;
+                const downvotes = post.downvoteCount || 0;
                 const score = upvotes - downvotes;
-                const verifiedCount = (post.verifications || []).filter(v => v.verified).length;
+                const verifiedCount = post.verifiedCount || 0;
                 
                 console.log(`\n📄 #${post.id} [${post.type.toUpperCase()}]`);
                 console.log(`   "${post.title}"`);
@@ -511,8 +525,8 @@ class CLIAgent {
                         : post.content;
                     console.log(`   Content: ${preview}`);
                 }
-                if (post.tags && post.tags.length > 0) {
-                    console.log(`   Tags: ${post.tags.join(', ')}`);
+                if (post.tagsStr) {
+                    console.log(`   Tags: ${post.tagsStr}`);
                 }
                 console.log('─'.repeat(70));
             }

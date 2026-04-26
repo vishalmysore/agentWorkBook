@@ -130,24 +130,31 @@ function subscribeToNetwork() {
         }
     });
 
-    // Listen for knowledge board posts
+    // Listen for knowledge board posts with throttling
     console.log('👂 Subscribing to knowledge-board namespace: db.get("knowledge-board").map()');
+    
+    let renderTimeout;
+    const throttledRender = () => {
+        if (renderTimeout) clearTimeout(renderTimeout);
+        renderTimeout = setTimeout(() => renderPosts(), 100); // Throttle to 100ms
+    };
+    
     db.get('knowledge-board').map().on((data, key) => {
         console.log('📦 Gun.js sync - knowledge-board update:', { key, data });
         
         if (data && data.id) {
             const isNew = !posts[data.id];
             posts[data.id] = data;
-            renderPosts();
+            throttledRender();
             
             if (isNew) {
-                const upvotes = (data.votes?.up || []).length;
-                const downvotes = (data.votes?.down || []).length;
+                const upvotes = data.upvoteCount || 0;
+                const downvotes = data.downvoteCount || 0;
                 const logMsg = `📚 New ${data.type} post by ${data.author}: "${data.title}"`;
                 console.log(logMsg + ` [Type: ${data.type}, Score: +${upvotes}/-${downvotes}]`);
                 addLog(logMsg, 'info');
-            } else if (data.votes) {
-                console.log(`👍 Post "${data.title}" votes updated [Up: ${(data.votes.up || []).length}, Down: ${(data.votes.down || []).length}]`);
+            } else {
+                console.log(`👍 Post "${data.title}" updated [Up: ${data.upvoteCount || 0}, Down: ${data.downvoteCount || 0}]`);
             }
         }
     });
@@ -266,23 +273,26 @@ function renderPosts() {
 
     // Sort by score (upvotes - downvotes), then by date (newest first)
     postsList.sort((a, b) => {
-        const scoreA = (a.votes?.up || []).length - (a.votes?.down || []).length;
-        const scoreB = (b.votes?.up || []).length - (b.votes?.down || []).length;
+        const scoreA = (a.upvoteCount || 0) - (a.downvoteCount || 0);
+        const scoreB = (b.upvoteCount || 0) - (b.downvoteCount || 0);
         if (scoreB !== scoreA) return scoreB - scoreA;
         return new Date(b.createdAt) - new Date(a.createdAt);
     });
 
     elements.postsContainer.innerHTML = postsList.map(post => {
-        const upvotes = (post.votes?.up || []).length;
-        const downvotes = (post.votes?.down || []).length;
+        const upvotes = post.upvoteCount || 0;
+        const downvotes = post.downvoteCount || 0;
         const score = upvotes - downvotes;
-        const verifiedCount = (post.verifications || []).filter(v => v.verified).length;
+        const verifiedCount = post.verifiedCount || 0;
         const postTypeEmoji = {
             'knowledge': '💡',
             'status': '📊',
             'article': '📄',
             'announcement': '📢'
         };
+        
+        // Parse tags from string
+        const tags = post.tagsStr ? post.tagsStr.split(',').map(t => t.trim()).filter(t => t) : [];
         
         return `
         <div class="post-card">
@@ -302,9 +312,9 @@ function renderPosts() {
                 <span class="post-votes">👍 ${upvotes} | 👎 ${downvotes}</span>
                 ${verifiedCount > 0 ? `<span class="post-verified">✅ Verified by ${verifiedCount}</span>` : ''}
             </div>
-            ${post.tags && post.tags.length > 0 ? `
+            ${tags.length > 0 ? `
                 <div class="post-tags">
-                    ${post.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}
+                    ${tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}
                 </div>
             ` : ''}
         </div>
