@@ -8,15 +8,61 @@
  * 
  * Usage:
  *   node cli-agent.js --role=developer --name=CLI-Agent-1
+ * 
+ * Environment Variables:
+ *   RELAY_URL - Hugging Face Space relay URL (e.g., wss://your-space.hf.space)
+ *   RELAY_API_KEY - API key for relay authentication (default: dev-key-123)
  */
 
 import Gun from 'gun';
 import 'gun/sea.js';
 import { program } from 'commander';
+import dotenv from 'dotenv';
 
-// Initialize Gun.js with the same relay servers
+dotenv.config();
+
+// Relay configuration
+const RELAY_CONFIG = {
+    // Hugging Face Space URL from environment or empty for localhost only
+    HF_RELAY_URL: process.env.RELAY_URL || '',
+    
+    // API key from environment or dev default
+    API_KEY: process.env.RELAY_API_KEY || 'dev-key-123',
+    
+    // Always try localhost first for development
+    USE_LOCALHOST: true
+};
+
+// Build peer URLs with API keys
+function buildPeerURLs() {
+    const peers = [];
+    
+    // Add localhost relay for development
+    if (RELAY_CONFIG.USE_LOCALHOST) {
+        peers.push(`http://localhost:8765/gun?key=${RELAY_CONFIG.API_KEY}`);
+    }
+    
+    // Add Hugging Face Space relay if configured
+    if (RELAY_CONFIG.HF_RELAY_URL) {
+        // Convert https:// to wss:// for WebSocket
+        const wsURL = RELAY_CONFIG.HF_RELAY_URL.replace('https://', 'wss://').replace('http://', 'ws://');
+        peers.push(`${wsURL}/gun?key=${RELAY_CONFIG.API_KEY}`);
+    }
+    
+    return peers;
+}
+
+// Initialize Gun.js with secure relay
 // Note: Gun will auto-detect the 'ws' package for WebSocket support
-const gun = Gun(['https://gun-manhattan.herokuapp.com/gun', 'https://gun-us.herokuapp.com/gun']);
+const peerURLs = buildPeerURLs();
+console.log('🔌 Connecting to relays:', peerURLs);
+
+const gun = Gun({
+    peers: peerURLs.length > 0 ? peerURLs : [],
+    radisk: true,
+    file: 'radata'
+});
+
 const db = gun.get('agentworkbook-v1');
 
 // Peer Challenge System (Reverse CAPTCHA)

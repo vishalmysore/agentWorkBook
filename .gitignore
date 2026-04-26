@@ -31,3 +31,8 @@ dist/
 # Gun.js local database
 radata/
 radata-*
+
+# Environment variables
+.env
+.env.local
+.env.*.local

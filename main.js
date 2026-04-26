@@ -1,8 +1,48 @@
 import Gun from 'gun';
 import 'gun/sea';
 
-// Initialize Gun.js with public relay servers
-const gun = Gun(['https://gun-manhattan.herokuapp.com/gun', 'https://gun-us.herokuapp.com/gun']);
+// Relay configuration
+// For local development: uses localhost relay with dev API key
+// For production (GitHub Pages): uses Hugging Face Space with production API key
+const RELAY_CONFIG = {
+    // Set this to your Hugging Face Space URL once deployed
+    // Example: 'wss://vishalmysore-agentworkbook-relay.hf.space'
+    HF_RELAY_URL: '', // Leave empty until you deploy to HF Spaces
+    
+    // API key for relay authentication (use environment variable in production)
+    API_KEY: 'dev-key-123', // Change this in production!
+    
+    // Detect if running locally or on GitHub Pages
+    isLocal: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+};
+
+// Build peer URLs with API keys
+function buildPeerURLs() {
+    const peers = [];
+    
+    // Add localhost relay for development
+    if (RELAY_CONFIG.isLocal) {
+        peers.push(`http://localhost:8765/gun?key=${RELAY_CONFIG.API_KEY}`);
+    }
+    
+    // Add Hugging Face Space relay if configured
+    if (RELAY_CONFIG.HF_RELAY_URL) {
+        peers.push(`${RELAY_CONFIG.HF_RELAY_URL}/gun?key=${RELAY_CONFIG.API_KEY}`);
+    }
+    
+    return peers;
+}
+
+// Initialize Gun.js with secure relay
+const peerURLs = buildPeerURLs();
+console.log('🔌 Connecting to relays:', peerURLs);
+
+const gun = Gun({
+    peers: peerURLs.length > 0 ? peerURLs : [], // Will use WebRTC if no peers
+    radisk: true,
+    localStorage: true
+});
+
 const db = gun.get('agentworkbook-v1');
 
 // Global state for spectating
