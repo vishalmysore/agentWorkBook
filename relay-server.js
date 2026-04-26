@@ -66,6 +66,14 @@ const MAX_CONNECTIONS_PER_IP = parseInt(process.env.MAX_CONNECTIONS_PER_IP || '5
 const RATE_LIMIT_WINDOW = parseInt(process.env.RATE_LIMIT_WINDOW || '1');
 const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || '100');
 
+// Time constants — surfaced near the rest of the configuration so the
+// behaviour can be tweaked from one place instead of grep-hunting magic
+// numbers like `60000` / `300000` scattered through the file.
+const REGISTRATION_TIMEOUT_MS = 5 * 60 * 1000;   // pending registration TTL
+const REGISTRATION_SWEEP_MS   = 60 * 1000;       // how often to GC expired regs
+const REQUIRED_VALIDATIONS    = 3;               // validators per registration
+const REQUEST_BODY_LIMIT      = '1mb';
+
 // Constant-time API key check. Falls back to includes() only when lengths differ
 // (which leaks length but not key bytes); the Set check above already short-circuits
 // the common reject path without comparing strings.
@@ -198,9 +206,9 @@ const registrationSystem = {
     // Validator IPs: Track which IPs have validated which registrations
     validatorIPs: new Map(), // Map<registrationId, Set<ip>>
     
-    // Configuration
-    REQUIRED_VALIDATIONS: 3, // Number of validations needed
-    REGISTRATION_TIMEOUT: 300000, // 5 minutes
+    // Configuration (sourced from named constants above)
+    REQUIRED_VALIDATIONS,
+    REGISTRATION_TIMEOUT: REGISTRATION_TIMEOUT_MS,
     
     // Generate secure API key
     generateAPIKey() {
@@ -287,7 +295,7 @@ const registrationSystem = {
 };
 
 // Cleanup expired registrations every minute
-setInterval(() => registrationSystem.cleanupExpired(), 60000);
+setInterval(() => registrationSystem.cleanupExpired(), REGISTRATION_SWEEP_MS);
 
 // Express app setup
 const app = express();
@@ -337,64 +345,86 @@ const limiter = rateLimit({
 app.use('/gun', limiter);
 
 // Request size limit
-app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
+app.use(express.urlencoded({ extended: true, limit: REQUEST_BODY_LIMIT }));
 
-// API Key authentication middleware
+/**
+ * Shared authentication / quota decision used by both the HTTP middleware
+ * and the WebSocket upgrade handler. Keeping this in one place ensures the
+ * two transports never drift in policy (e.g. one accepts a key the other
+ * rejects), which was a real risk before this refactor.
+ *
+ * Pass `{ checkQuotaOnly: true }` for read-only endpoints like `/quota` —
+ * presence + key are still validated, but the daily quota is not consumed.
+ *
+ * Returns either { ok: true, apiKey } or { ok: false, status, code, body, log }.
+ * The caller is responsible for translating the failure into HTTP/JSON
+ * (express middleware) or a raw HTTP status line (WS upgrade), incrementing
+ * the relevant metric counter, and (on success) calling
+ * `keyRateLimits.incrementCount` if the request should consume quota.
+ */
+function evaluateAuth(presentedKey, ip, opts = {}) {
+    if (!presentedKey) {
+        return {
+            ok: false,
+            status: 401,
+            code: 'MISSING_API_KEY',
+            body: { error: 'API key required' },
+            log: { ip }
+        };
+    }
+
+    if (!isValidAPIKey(presentedKey)) {
+        return {
+            ok: false,
+            status: 403,
+            code: 'INVALID_API_KEY',
+            body: { error: 'Invalid API key' },
+            log: { ip, key: presentedKey.substring(0, 8) + '...' }
+        };
+    }
+
+    if (!opts.checkQuotaOnly && !keyRateLimits.canSendMessage(presentedKey, ip)) {
+        const tier = keyRateLimits.getTier(presentedKey);
+        const compositeKey = keyRateLimits.getCompositeKey(presentedKey, ip);
+        const resetTime = keyRateLimits.messageCounts.get(compositeKey)?.resetTime || 0;
+        return {
+            ok: false,
+            status: 429,
+            code: 'KEY_DAILY_LIMIT',
+            body: {
+                error: 'Daily message limit exceeded',
+                tier: tier.name,
+                limit: tier.limit,
+                resetTime: new Date(resetTime).toISOString()
+            },
+            log: { ip, key: presentedKey.substring(0, 8) + '...', tier: tier.name, limit: tier.limit }
+        };
+    }
+
+    return { ok: true, apiKey: presentedKey };
+}
+
+// API Key authentication middleware (HTTP). Delegates the decision to
+// `evaluateAuth` and translates the result into JSON.
 function authenticateAPIKey(req, res, next) {
     const apiKey = req.query.key || req.headers['x-api-key'];
-    
-    if (!apiKey) {
-        metrics.blockedAuth++;
-        logSecurity('MISSING_API_KEY', { 
-            ip: getClientIP(req), 
-            timestamp: new Date().toISOString() 
-        });
-        return res.status(401).json({ error: 'API key required' });
-    }
-    
-    if (!isValidAPIKey(apiKey)) {
-        metrics.blockedAuth++;
-        logSecurity('INVALID_API_KEY', {
-            ip: getClientIP(req),
-            key: apiKey.substring(0, 8) + '...',
-            timestamp: new Date().toISOString()
-        });
-        return res.status(403).json({ error: 'Invalid API key' });
-    }
-
+    const ip = getClientIP(req);
     // /quota is a read-only check; don't charge a quota point to inspect quota.
     const isQuotaCheck = req.path === '/quota' || req.originalUrl.startsWith('/quota');
+    const result = evaluateAuth(apiKey, ip, { checkQuotaOnly: isQuotaCheck });
 
-    // Check per-key daily message limit (per key+IP combination)
-    const ip = getClientIP(req);
-    if (!isQuotaCheck && !keyRateLimits.canSendMessage(apiKey, ip)) {
-        const tier = keyRateLimits.getTier(apiKey);
-        const compositeKey = keyRateLimits.getCompositeKey(apiKey, ip);
-        metrics.rateLimitHits++;
-        logSecurity('KEY_DAILY_LIMIT', { 
-            ip, 
-            key: apiKey.substring(0, 8) + '...', 
-            tier: tier.name,
-            limit: tier.limit,
-            timestamp: new Date().toISOString() 
-        });
-        return res.status(429).json({ 
-            error: 'Daily message limit exceeded',
-            tier: tier.name,
-            limit: tier.limit,
-            resetTime: new Date(keyRateLimits.messageCounts.get(compositeKey)?.resetTime || 0).toISOString()
-        });
+    if (!result.ok) {
+        if (result.status === 429) metrics.rateLimitHits++;
+        else metrics.blockedAuth++;
+        logSecurity(result.code, { ...result.log, timestamp: new Date().toISOString() });
+        return res.status(result.status).json(result.body);
     }
-    
-    // Increment message count (skipped for read-only quota check above).
+
     if (!isQuotaCheck) {
         keyRateLimits.incrementCount(apiKey, ip);
     }
-
-    // Store key in request for later use
     req.apiKey = apiKey;
-
     next();
 }
 
@@ -778,7 +808,24 @@ const gun = Gun({
     axe: false // Disable multicast for production
 });
 
-// Track WebSocket connections with API key validation
+// HTTP status text used in the WS upgrade reject path. Express handles this
+// for HTTP requests, but raw `socket.write` needs the status line spelled out.
+const HTTP_STATUS_TEXT = {
+    401: 'Unauthorized',
+    403: 'Forbidden',
+    429: 'Too Many Requests'
+};
+
+function rejectWSUpgrade(socket, status, body) {
+    const text = HTTP_STATUS_TEXT[status] || 'Bad Request';
+    const json = JSON.stringify(body);
+    socket.write(`HTTP/1.1 ${status} ${text}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(json)}\r\n\r\n${json}`);
+    socket.destroy();
+}
+
+// Track WebSocket connections with API key validation. Auth decision is
+// shared with the HTTP middleware via `evaluateAuth` so both transports
+// enforce identical policy.
 server.on('upgrade', (request, socket, head) => {
     const ip = getClientIP({ headers: request.headers, connection: socket });
 
@@ -789,62 +836,24 @@ server.on('upgrade', (request, socket, head) => {
     if (origin && !ALLOWED_ORIGINS_SET.has(origin)) {
         metrics.blockedOrigins++;
         logSecurity('WS_BLOCKED_ORIGIN', { ip, origin, timestamp: new Date().toISOString() });
-        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
-        socket.destroy();
+        rejectWSUpgrade(socket, 403, { error: 'Origin not allowed' });
         return;
     }
 
-    // Extract API key from query string or headers
     const url = new URL(request.url, `http://${request.headers.host}`);
     const apiKey = url.searchParams.get('key') || request.headers['x-api-key'];
 
-    // Validate API key for WebSocket connections
-    if (!apiKey) {
-        metrics.blockedAuth++;
-        logSecurity('WS_MISSING_API_KEY', { ip, timestamp: new Date().toISOString() });
-        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-        socket.destroy();
+    const result = evaluateAuth(apiKey, ip);
+    if (!result.ok) {
+        if (result.status === 429) metrics.rateLimitHits++;
+        else metrics.blockedAuth++;
+        logSecurity(`WS_${result.code}`, { ...result.log, timestamp: new Date().toISOString() });
+        rejectWSUpgrade(socket, result.status, result.body);
         return;
     }
 
-    if (!isValidAPIKey(apiKey)) {
-        metrics.blockedAuth++;
-        logSecurity('WS_INVALID_API_KEY', {
-            ip,
-            key: apiKey.substring(0, 8) + '...',
-            timestamp: new Date().toISOString()
-        });
-        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
-        socket.destroy();
-        return;
-    }
-    
-    // Check per-key daily message limit (per key+IP combination)
-    if (!keyRateLimits.canSendMessage(apiKey, ip)) {
-        const tier = keyRateLimits.getTier(apiKey);
-        const compositeKey = keyRateLimits.getCompositeKey(apiKey, ip);
-        metrics.rateLimitHits++;
-        logSecurity('WS_KEY_DAILY_LIMIT', { 
-            ip, 
-            key: apiKey.substring(0, 8) + '...', 
-            tier: tier.name,
-            limit: tier.limit,
-            timestamp: new Date().toISOString() 
-        });
-        socket.write('HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\n\r\n');
-        socket.write(JSON.stringify({ 
-            error: 'Daily message limit exceeded',
-            tier: tier.name,
-            limit: tier.limit,
-            resetTime: new Date(keyRateLimits.messageCounts.get(compositeKey)?.resetTime || 0).toISOString()
-        }));
-        socket.destroy();
-        return;
-    }
-    
-    // Increment message count
     keyRateLimits.incrementCount(apiKey, ip);
-    
+
     // Authentication successful
     const tier = keyRateLimits.getTier(apiKey);
     logSecurity('WS_AUTH_SUCCESS', { 
