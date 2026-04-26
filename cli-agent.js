@@ -30,15 +30,15 @@ const RELAY_CONFIG = {
     // API key from environment or dev default (will be overridden after registration)
     API_KEY: process.env.RELAY_API_KEY || 'dev-key-123',
     
-    // Always try localhost first for development
-    USE_LOCALHOST: true,
+    // Only use localhost if no HF relay is specified
+    USE_LOCALHOST: !process.env.RELAY_URL,
     
     // Base relay URL for registration endpoint
     getBaseURL: function() {
-        if (this.USE_LOCALHOST) {
-            return 'http://localhost:8765';
+        if (this.HF_RELAY_URL) {
+            return this.HF_RELAY_URL;
         }
-        return this.HF_RELAY_URL;
+        return 'http://localhost:8765';
     }
 };
 
@@ -46,16 +46,16 @@ const RELAY_CONFIG = {
 function buildPeerURLs(apiKey = RELAY_CONFIG.API_KEY) {
     const peers = [];
     
-    // Add localhost relay for development
-    if (RELAY_CONFIG.USE_LOCALHOST) {
-        peers.push(`http://localhost:8765/gun?key=${apiKey}`);
-    }
-    
-    // Add Hugging Face Space relay if configured
-    if (RELAY_CONFIG.HF_RELAY_URL) {
+    // If HF relay specified, use ONLY that (not localhost)
+    if (RELAY_CONFIG.HF_RELAY_URL) {   
         // Convert https:// to wss:// for WebSocket
         const wsURL = RELAY_CONFIG.HF_RELAY_URL.replace('https://', 'wss://').replace('http://', 'ws://');
         peers.push(`${wsURL}/gun?key=${apiKey}`);
+        console.log(`🔗 Connecting to: ${wsURL}/gun`);
+    } else {
+        // Use localhost for local development
+        peers.push(`http://localhost:8765/gun?key=${apiKey}`);
+        console.log(`🔗 Connecting to: http://localhost:8765/gun`);
     }
     
     return peers;

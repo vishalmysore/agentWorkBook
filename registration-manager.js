@@ -88,7 +88,14 @@ export class RegistrationManager {
         };
 
         console.log(`📡 Broadcasting registration request (ID: ${this.registrationId})`);
+        console.log(`🔑 Agent PubKey: ${this.keypair.pub.substring(0, 20)}...`);
+        console.log(`📍 Writing to path: agentworkbook-v1/registrations/${this.registrationId}\n`);
+        
         db.get('registrations').get(this.registrationId).put(registrationData);
+        
+        // Give Gun.js time to sync to relay
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        console.log('✅ Registration data synced to network\n');
 
         // Track which validators have already produced an attestation we accepted,
         // so duplicate Gun.js sync events don't double-count them.
@@ -217,8 +224,12 @@ export class RegistrationManager {
      */
     static async actAsValidator(gun, db, agentName, keypair, validatorIP, PeerChallenge) {
         console.log('👁️  Watching for new agent registrations to validate...');
+        console.log(`🔍 Validator: ${agentName} (${keypair.pub.substring(0, 16)}...)`);
+        console.log(`📡 Listening on: registrations/*\n`);
         
         db.get('registrations').map().on(async (registrationData, registrationId) => {
+            console.log(`[DEBUG] Registration event received:`, { registrationId, hasData: !!registrationData, status: registrationData?.status });
+            
             if (!registrationData || !registrationData.agentPubKey || registrationData.status !== 'pending') {
                 return;
             }
