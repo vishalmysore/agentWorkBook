@@ -19,7 +19,7 @@
  * - ALLOWED_ORIGINS: Comma-separated list of allowed origins (e.g., "https://vishalmysore.github.io,http://localhost:3000")
  * - PORT: Server port (default: 8765)
  * - MAX_CONNECTIONS: Maximum total WebSocket connections (default: 500)
- * - MAX_CONNECTIONS_PER_IP: Maximum connections per IP address (default: 5)
+ * - MAX_CONNECTIONS_PER_IP: Maximum connections per IP address (default: 1)
  * - RATE_LIMIT_WINDOW: Rate limit window in minutes (default: 1)
  * - RATE_LIMIT_MAX: Maximum requests per window (default: 100)
  */
@@ -62,7 +62,7 @@ const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
     : ['https://vishalmysore.github.io', 'http://localhost:3000', 'http://localhost:5173'];
 const ALLOWED_ORIGINS_SET = new Set(ALLOWED_ORIGINS);
 const MAX_CONNECTIONS = parseInt(process.env.MAX_CONNECTIONS || '500');
-const MAX_CONNECTIONS_PER_IP = parseInt(process.env.MAX_CONNECTIONS_PER_IP || '5');
+const MAX_CONNECTIONS_PER_IP = parseInt(process.env.MAX_CONNECTIONS_PER_IP || '1');
 const RATE_LIMIT_WINDOW = parseInt(process.env.RATE_LIMIT_WINDOW || '1');
 const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || '100');
 
