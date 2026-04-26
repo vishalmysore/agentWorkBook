@@ -46,8 +46,12 @@ const PORT = process.env.PORT || 8765;
 const ALLOW_DEV_KEYS = process.env.ALLOW_DEV_KEYS === '1';
 const RAW_API_KEYS = process.env.API_KEYS ? process.env.API_KEYS.split(',').map(k => k.trim()).filter(Boolean) : ['dev-key-123'];
 
-// Bootstrap validator keys (always valid, regardless of API_KEYS env var)
-const BOOTSTRAP_KEYS = ['agent-bootstrap1', 'agent-bootstrap2', 'agent-bootstrap3', 'demo-registration'];
+// Master validator key for seed validators (set via VALIDATOR_MASTER_KEY env var)
+// This single key is used by all seed validators to bypass registration
+const VALIDATOR_MASTER_KEY = process.env.VALIDATOR_MASTER_KEY || null;
+
+// Demo registration key for agents trying to register
+const DEMO_KEYS = ['demo-registration'];
 
 // Refuse to start with default/dev key in production unless explicitly opted in.
 const DEFAULT_KEYS = new Set(['dev-key-123', 'your-production-key-here']);
@@ -57,9 +61,18 @@ if (hasDefaultKey && !ALLOW_DEV_KEYS) {
     process.exit(1);
 }
 
+// Warn if no master validator key set
+if (!VALIDATOR_MASTER_KEY) {
+    console.warn('⚠️  No VALIDATOR_MASTER_KEY set. Seed validators will not be able to connect.');
+}
+
 // O(1) lookup; mutated when registration system issues new keys.
-// Includes bootstrap keys for seed validators
-const API_KEYS = new Set([...RAW_API_KEYS, ...BOOTSTRAP_KEYS]);
+// Includes master validator key and demo keys
+const API_KEYS = new Set([
+    ...RAW_API_KEYS,
+    ...DEMO_KEYS,
+    ...(VALIDATOR_MASTER_KEY ? [VALIDATOR_MASTER_KEY] : [])
+]);
 
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean)
@@ -118,7 +131,7 @@ const keyRateLimits = {
     // API Key tiers with daily message limits
     tiers: {
         demo: { limit: 4, pattern: /^demo-/ },           // Demo keys: 4 messages/day per IP (testing only)
-        bootstrap: { limit: 200, pattern: /^agent-bootstrap/ }, // Bootstrap validators: 200 messages/day per IP
+        validator: { limit: 10000, pattern: /^[a-f0-9]{64}$/ }, // Master validator key: high limit (64 hex chars)
         spectator: { limit: 10000, pattern: /^spectator-/ },    // Spectator keys: unlimited per IP (read-only)
         registered: { limit: 1000, pattern: /^agent-[a-f0-9]{64}$/ } // Self-registered (FULL): 1000 messages/day per IP
     },

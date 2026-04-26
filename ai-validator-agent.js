@@ -213,11 +213,11 @@ class SmartAIAgent {
         // Create AI challenge generator
         this.aiChallenge = new AIPeerChallenge(this.llm);
 
-        // Check for bootstrap API key first (highest priority)
-        const bootstrapKey = process.env.RELAY_API_KEY;
-        if (bootstrapKey) {
-            console.log(`✅ Using bootstrap API key: ${bootstrapKey}`);
-            this.apiKey = bootstrapKey;
+        // Check for master validator key first (highest priority)
+        const masterKey = process.env.VALIDATOR_MASTER_KEY || process.env.RELAY_API_KEY;
+        if (masterKey) {
+            console.log(`✅ Using validator master key (${masterKey.substring(0, 8)}...${masterKey.substring(masterKey.length - 4)})`);
+            this.apiKey = masterKey;
         } else {
             // Check if already registered
             const regManager = new RegistrationManager(this.name, this.keypair, this.relayUrl);
