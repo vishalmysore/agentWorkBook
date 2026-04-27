@@ -243,12 +243,21 @@ export class RegistrationManager {
                 const regIds = Object.keys(registrations).filter(k => k !== '_');
                 console.log(`[POLL] Found ${regIds.length} registration(s): ${regIds.join(', ')}`);
                 
+                let processedCount = 0;
+                let skippedCount = 0;
+                
                 for (const registrationId of regIds) {
                     const registrationData = registrations[registrationId];
-                    if (!registrationData || typeof registrationData !== 'object') continue;
-                    if (processedRegistrations.has(registrationId)) continue;
+                    if (!registrationData || typeof registrationData !== 'object') {
+                        console.log(`[POLL] ⏭️  Skipping ${registrationId}: invalid data`);
+                        continue;
+                    }
+                    if (processedRegistrations.has(registrationId)) {
+                        skippedCount++;
+                        continue;
+                    }
                     
-                    console.log(`[POLL] Registration ${registrationId}:`, { 
+                    console.log(`[POLL] 📋 Processing ${registrationId}:`, { 
                         status: registrationData.status,
                         agentName: registrationData.agentName,
                         agentPubKey: registrationData.agentPubKey?.substring(0, 16) + '...'
@@ -256,8 +265,13 @@ export class RegistrationManager {
                     
                     if (registrationData.status === 'pending' && registrationData.agentPubKey) {
                         await handleRegistration(registrationId, registrationData);
+                        processedCount++;
+                    } else {
+                        console.log(`[POLL] ⏭️  Skipping ${registrationId}: status=${registrationData.status}, hasPubKey=${!!registrationData.agentPubKey}`);
                     }
                 }
+                
+                console.log(`[POLL] ✅ Processed ${processedCount}, skipped ${skippedCount} already-handled registrations`);
             });
         };
         
@@ -267,13 +281,19 @@ export class RegistrationManager {
         
         // Also keep .map().on() as backup
         db.get('registrations').map().on(async (registrationData, registrationId) => {
-            console.log(`[EVENT] Registration event:`, { registrationId, status: registrationData?.status });
+            console.log(`[EVENT] Registration event:`, { registrationId, status: registrationData?.status, hasPubKey: !!registrationData?.agentPubKey });
             
             if (!registrationData || !registrationData.agentPubKey || registrationData.status !== 'pending') {
+                console.log(`[EVENT] ⏭️  Skipping ${registrationId}: incomplete data or not pending`);
                 return;
             }
             
-            if (processedRegistrations.has(registrationId)) return;
+            if (processedRegistrations.has(registrationId)) {
+                console.log(`[EVENT] ⏭️  Already processed ${registrationId}`);
+                return;
+            }
+            
+            console.log(`[EVENT] 🔄 Calling handleRegistration for ${registrationId}`);
             await handleRegistration(registrationId, registrationData);
         });
         
