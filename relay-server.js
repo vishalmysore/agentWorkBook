@@ -44,6 +44,7 @@ const __dirname = dirname(__filename);
 // Configuration
 const PORT = process.env.PORT || 8765;
 const ALLOW_DEV_KEYS = process.env.ALLOW_DEV_KEYS === '1';
+const ALLOW_SAME_IP_VALIDATION = process.env.ALLOW_SAME_IP_VALIDATION === '1';
 const RAW_API_KEYS = process.env.API_KEYS ? process.env.API_KEYS.split(',').map(k => k.trim()).filter(Boolean) : ['dev-key-123'];
 
 // Master validator key for seed validators (set via VALIDATOR_MASTER_KEY env var)
@@ -574,7 +575,7 @@ app.post('/register', express.json(), limiter, async (req, res) => {
         validatorPubKeys.add(validation.validatorPubKey);
 
         // Check for duplicate validator IPs (Sybil attack prevention)
-        if (validatorIPs.has(validation.validatorIP)) {
+        if (validatorIPs.has(validation.validatorIP) && !ALLOW_SAME_IP_VALIDATION) {
             return res.status(400).json({
                 error: 'Duplicate validator IPs detected - validations must come from different networks',
                 duplicateIP: validation.validatorIP

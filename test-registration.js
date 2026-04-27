@@ -53,7 +53,8 @@ class RegistrationTestHarness {
             env: {
                 ...process.env,
                 PORT: '8765',
-                API_KEYS: 'test-validator-1,test-validator-2,test-validator-3'
+                API_KEYS: 'test-validator-1,test-validator-2,test-validator-3',
+                ALLOW_SAME_IP_VALIDATION: '1'
             }
         });
 
@@ -70,7 +71,7 @@ class RegistrationTestHarness {
         this.processes.push(relay);
 
         // Wait for relay to start
-        await this.waitForLog('relay', 'Relay server running', 10000);
+        await this.waitForLog('relay', 'agentWorkBook Gun.js Relay Server', 10000);
         console.log('✅ Relay server ready\n');
     }
 
@@ -112,7 +113,7 @@ class RegistrationTestHarness {
             // Ignore if doesn't exist
         }
 
-        const newAgent = spawn('node', ['cli-agent.js', '--role=tester', '--name=NewAgent'], {
+        const newAgent = spawn('node', ['cli-agent.js', '--role=developer', '--name=NewAgent'], {
             cwd: __dirname
         });
 
@@ -221,10 +222,11 @@ class RegistrationTestHarness {
             console.log('  ✅ API key issued and stored');
             console.log('  ✅ Agent connected to network\n');
 
-            console.log('💡 Press Ctrl+C to stop all processes\n');
+            console.log('💡 All tests passed, cleaning up...\n');
 
-            // Keep processes running for manual inspection
-            await new Promise(() => {});
+            // Clean up and exit
+            await this.cleanup();
+            process.exit(0);
 
         } catch (error) {
             console.error('\n❌ Test failed:', error.message);

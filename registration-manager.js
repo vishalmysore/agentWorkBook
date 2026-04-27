@@ -17,8 +17,8 @@ export class RegistrationManager {
         this.relayURL = relayURL;
         this.keyFilePath = join(process.cwd(), '.agentkey');
         this.registrationId = null;
-        this.receivedChallenges = [];
-        this.solvedChallenges = [];
+        this.receivedChallenges = new Set();
+        this.solvedChallenges = new Map();
         this.REQUIRED_VALIDATIONS = 3;
         this.CHALLENGE_TIMEOUT = 300000; // 5 minutes
     }
@@ -100,30 +100,46 @@ export class RegistrationManager {
         // Track which validators have already produced an attestation we accepted,
         // so duplicate Gun.js sync events don't double-count them.
         const acceptedValidators = new Set();
+        let submitting = false;
+        let registrationCompleted = false;
 
         // Listen for challenges from validators
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
-                reject(new Error('Registration timeout - not enough validators responded'));
+                if (!registrationCompleted) {
+                    reject(new Error('Registration timeout - not enough validators responded'));
+                }
             }, this.CHALLENGE_TIMEOUT);
 
             // Watch for challenges and post solutions
-            db.get('registrations').get(this.registrationId).get('challenges').map().on(async (challengeData, challengeId) => {
-                if (!challengeData || !challengeData.challenge) return;
+            db.get('registrations').get(this.registrationId).get('challenges').map().on(async (rawChallengeData, challengeId) => {
+                if (!rawChallengeData || !challengeId || challengeId === '_' || this.receivedChallenges.has(challengeId)) return;
 
-                if (this.receivedChallenges.includes(challengeId)) return;
-                this.receivedChallenges.push(challengeId);
+                // Fetch full data to check if it's complete (flat fields)
+                const challengeData = await new Promise(resolve => {
+                    db.get('registrations').get(this.registrationId).get('challenges').get(challengeId).once(data => resolve(data));
+                });
+
+                if (!challengeData || !challengeData.challengeType || this.receivedChallenges.has(challengeId)) return;
+                this.receivedChallenges.add(challengeId);
+
+                const challenge = {
+                    type: challengeData.challengeType,
+                    question: challengeData.challengeQuestion,
+                    answer: challengeData.challengeAnswer
+                };
 
                 console.log(`\n🎯 Challenge received from validator: ${challengeData.validatorName || 'Unknown'}`);
-                console.log(`   Type: ${challengeData.challenge.type}`);
-                console.log(`   Question: ${challengeData.challenge.question}`);
+                console.log(`   Type: ${challenge.type}`);
+                console.log(`   Question: ${challenge.question}`);
 
-                const solution = await PeerChallenge.solve(challengeData.challenge);
-                const verified = await PeerChallenge.verify(challengeData.challenge, solution);
+                const solution = await PeerChallenge.solve(challenge);
+                const verified = await PeerChallenge.verify(challenge, solution);
                 if (!verified) {
                     console.error('❌ Challenge solve failed - internal verification error');
                     return;
                 }
+                console.log(`✅ Solved challenge from ${challengeData.validatorName || 'Unknown'}`);
                 console.log(`✅ Challenge solved: "${solution}"`);
 
                 // Post solution back so the validator can sign an attestation.
@@ -135,13 +151,21 @@ export class RegistrationManager {
                 });
             });
 
-            // Watch for signed attestations from validators. Each attestation is a
-            // SEA-signed message containing {registrationId, agentPubKey, solution}
-            // produced with the validator's keypair — this is what the relay
-            // actually verifies.
-            db.get('registrations').get(this.registrationId).get('attestations').map().on(async (attestation, validatorPubKey) => {
-                if (!attestation || !attestation.signature || !attestation.solution) return;
-                if (acceptedValidators.has(validatorPubKey)) return;
+            // Watch for signed attestations from validators.
+            db.get('registrations').get(this.registrationId).get('attestations').map().on(async (attestationData, validatorPubKey) => {
+                if (!attestationData || !validatorPubKey || validatorPubKey === '_' || acceptedValidators.has(validatorPubKey) || registrationCompleted) return;
+
+                // Ensure we have the full attestation data (flat fields)
+                const attestation = await new Promise(resolve => {
+                    db.get('registrations').get(this.registrationId).get('attestations').get(validatorPubKey).once(data => {
+                        resolve(data);
+                    });
+                });
+
+                if (!attestation || !attestation.signature || !attestation.solution || acceptedValidators.has(validatorPubKey)) return;
+
+                // Mark as accepted immediately to prevent race conditions
+                acceptedValidators.add(validatorPubKey);
 
                 const verifiedPayload = await Gun.SEA.verify(attestation.signature, validatorPubKey);
                 if (!verifiedPayload || verifiedPayload.registrationId !== this.registrationId
@@ -150,26 +174,35 @@ export class RegistrationManager {
                     return;
                 }
 
-                acceptedValidators.add(validatorPubKey);
-                this.solvedChallenges.push({
+                const challenge = {
+                    type: attestation.challengeType,
+                    question: attestation.challengeQuestion,
+                    answer: attestation.challengeAnswer
+                };
+
+                this.solvedChallenges.set(validatorPubKey, {
                     validatorPubKey,
                     validatorIP: attestation.validatorIP || 'unknown',
                     challengeProof: {
-                        challenge: attestation.challenge,
+                        challenge,
                         solution: attestation.solution,
                         signature: attestation.signature
                     }
                 });
 
-                console.log(`📊 Progress: ${this.solvedChallenges.length}/${this.REQUIRED_VALIDATIONS} validations collected`);
+                console.log(`📊 Progress: ${this.solvedChallenges.size}/${this.REQUIRED_VALIDATIONS} validations collected`);
 
-                if (this.solvedChallenges.length >= this.REQUIRED_VALIDATIONS) {
+                if (this.solvedChallenges.size >= this.REQUIRED_VALIDATIONS && !submitting) {
+                    submitting = true;
+                    registrationCompleted = true;
                     clearTimeout(timeout);
                     console.log('\n🎉 Collected sufficient validations! Submitting to relay server...');
                     try {
                         const apiKey = await this.submitRegistration();
                         resolve(apiKey);
                     } catch (error) {
+                        submitting = false; // Allow retry on failure
+                        registrationCompleted = false;
                         reject(error);
                     }
                 }
@@ -185,7 +218,7 @@ export class RegistrationManager {
             agentName: this.agentName,
             agentPubKey: this.keypair.pub,
             registrationId: this.registrationId,
-            validations: this.solvedChallenges
+            validations: Array.from(this.solvedChallenges.values())
         };
         
         console.log(`\n📤 Submitting registration to: ${this.relayURL}/register`);
@@ -209,6 +242,7 @@ export class RegistrationManager {
             throw new Error('Registration failed: No API key returned');
         }
         
+        console.log('✅ Registration complete');
         console.log('✅ Registration successful!');
         console.log(`🔑 API Key received: ${result.apiKey.substring(0, 20)}...`);
         console.log(`📝 Message: ${result.message}`);
@@ -264,62 +298,34 @@ export class RegistrationManager {
                     return;
                 }
                 
-                console.log(`[POLL] Parsing registration IDs from response...`);
-                const allKeys = Object.keys(registrations);
-                console.log(`[POLL] Total keys in object: ${allKeys.length}`);
-                console.log(`[POLL] All keys:`, allKeys);
-                
-                const regIds = allKeys.filter(k => k !== '_');
-                console.log(`[POLL] ✓ Found ${regIds.length} registration(s) (excluding Gun metadata)`);
-                console.log(`[POLL] Registration IDs: ${regIds.join(', ')}`);
+                const regIds = Object.keys(registrations).filter(k => k !== '_');
+                console.log(`[POLL] ✓ Found ${regIds.length} registration IDs`);
                 
                 let processedCount = 0;
-                let skippedCount = 0;
-                let invalidCount = 0;
                 
                 for (const registrationId of regIds) {
-                    console.log(`\n[POLL] --- Examining ${registrationId} ---`);
-                    const registrationData = registrations[registrationId];
-                    
-                    if (!registrationData || typeof registrationData !== 'object') {
-                        console.log(`[POLL] ⏭️  Invalid data type:`, typeof registrationData);
-                        invalidCount++;
+                    if (processedRegistrations.has(registrationId)) continue;
+
+                    // Explicitly fetch the registration data (avoiding soul-only objects)
+                    const registrationData = await new Promise(resolve => {
+                        db.get('registrations').get(registrationId).once(data => resolve(data));
+                    });
+
+                    if (!registrationData || registrationData.status !== 'pending' || !registrationData.agentPubKey) {
                         continue;
                     }
                     
-                    console.log(`[POLL] Data keys:`, Object.keys(registrationData));
-                    console.log(`[POLL] status: ${registrationData.status}`);
-                    console.log(`[POLL] agentName: ${registrationData.agentName}`);
-                    console.log(`[POLL] agentPubKey: ${registrationData.agentPubKey ? registrationData.agentPubKey.substring(0, 20) + '...' : 'MISSING'}`);
-                    console.log(`[POLL] timestamp: ${registrationData.timestamp ? new Date(registrationData.timestamp).toISOString() : 'MISSING'}`);
-                    
-                    if (processedRegistrations.has(registrationId)) {
-                        console.log(`[POLL] ⏭️  Already in processedRegistrations Set`);
-                        skippedCount++;
-                        continue;
-                    }
-                    
-                    console.log(`[POLL] 📋 NEW - will process this registration`);
-                    
-                    if (registrationData.status === 'pending' && registrationData.agentPubKey) {
-                        console.log(`[POLL] ✓ Status is 'pending' and has agentPubKey`);
-                        console.log(`[POLL] 🔄 Calling handleRegistration()...`);
-                        try {
-                            await handleRegistration(registrationId, registrationData);
-                            processedCount++;
-                            console.log(`[POLL] ✓ handleRegistration() completed for ${registrationId}`);
-                        } catch (error) {
-                            console.error(`[POLL] ❌ ERROR in handleRegistration():`, error);
-                            console.error(`[POLL] Error stack:`, error.stack);
-                        }
-                    } else {
-                        console.log(`[POLL] ⏭️  Skipping: status='${registrationData.status}', hasPubKey=${!!registrationData.agentPubKey}`);
-                        // Don't add to processedRegistrations - allow retry if status changes
+                    console.log(`\n[POLL] 📋 Processing NEW registration: ${registrationId}`);
+                    try {
+                        await handleRegistration(registrationId, registrationData);
+                        processedCount++;
+                    } catch (error) {
+                        console.error(`[POLL] ❌ ERROR in handleRegistration():`, error);
                     }
                 }
                 
                 console.log(`\n[POLL] ===================== POLLING CYCLE END =====================`);
-                console.log(`[POLL] Summary: processed=${processedCount}, skipped=${skippedCount}, invalid=${invalidCount}`);
+                console.log(`[POLL] Summary: processed=${processedCount}`);
                 console.log(`[POLL] processedRegistrations.size now: ${processedRegistrations.size}`);
             });
         };
@@ -332,50 +338,23 @@ export class RegistrationManager {
         
         // Also keep .map().on() as backup
         console.log(`[INIT] Setting up .map().on() event listener as backup...`);
-        db.get('registrations').map().on(async (registrationData, registrationId) => {
-            console.log(`\n[EVENT] ==================== EVENT TRIGGERED ====================`);
-            console.log(`[EVENT] Registration ID: ${registrationId}`);
-            console.log(`[EVENT] Timestamp: ${new Date().toISOString()}`);
-            console.log(`[EVENT] Data received:`, registrationData ? JSON.stringify(registrationData, null, 2) : 'NULL');
-            console.log(`[EVENT] status: ${registrationData?.status}`);
-            console.log(`[EVENT] hasPubKey: ${!!registrationData?.agentPubKey}`);
-            console.log(`[EVENT] agentName: ${registrationData?.agentName}`);
-            
-            if (!registrationData) {
-                console.log(`[EVENT] ⏭️  Skipping: registrationData is null/undefined`);
+        db.get('registrations').map().on(async (rawReg, registrationId) => {
+            if (!rawReg || processedRegistrations.has(registrationId)) return;
+
+            // Explicitly fetch the registration data
+            const registrationData = await new Promise(resolve => {
+                db.get('registrations').get(registrationId).once(data => resolve(data));
+            });
+
+            if (!registrationData || registrationData.status !== 'pending' || !registrationData.agentPubKey) {
                 return;
             }
-            
-            if (!registrationData.agentPubKey) {
-                console.log(`[EVENT] ⏭️  Skipping: agentPubKey is missing`);
-                console.log(`[EVENT]    Available keys:`, Object.keys(registrationData));
-                return;
-            }
-            
-            if (registrationData.status !== 'pending') {
-                console.log(`[EVENT] ⏭️  Skipping: status is '${registrationData.status}' (not 'pending')`);
-                return;
-            }
-            
-            console.log(`[EVENT] ✓ Data validation passed`);
-            
-            if (processedRegistrations.has(registrationId)) {
-                console.log(`[EVENT] ⏭️  Already in processedRegistrations Set (size: ${processedRegistrations.size})`);
-                return;
-            }
-            
-            console.log(`[EVENT] ✓ Not yet processed`);
-            console.log(`[EVENT] 🔄 Calling handleRegistration()...`);
             
             try {
                 await handleRegistration(registrationId, registrationData);
-                console.log(`[EVENT] ✓ handleRegistration() completed successfully`);
             } catch (error) {
                 console.error(`[EVENT] ❌ ERROR in handleRegistration():`, error);
-                console.error(`[EVENT] Error stack:`, error.stack);
             }
-            
-            console.log(`[EVENT] ==================== EVENT FINISHED ====================\n`);
         });
         
         console.log(`[INIT] ✓ Event listener registered`);
@@ -450,16 +429,18 @@ export class RegistrationManager {
             
             console.log(`🎯 Issuing challenge (${challenge.type}): ${challenge.question}`);
             
-            // Post challenge
+            // Post challenge (flattened fields to avoid nested souls)
             console.log(`[HANDLE] Building challengeData object...`);
             const challengeData = {
                 validatorName: agentName,
                 validatorPubKey: keypair.pub,
                 validatorIP: validatorIP || 'unknown',
-                challenge: challenge,
+                challengeType: challenge.type,
+                challengeQuestion: challenge.question,
+                challengeAnswer: challenge.answer,
                 timestamp: Date.now()
             };
-            console.log(`[HANDLE] Challenge data:`, JSON.stringify(challengeData, null, 2));
+            console.log(`[HANDLE] Challenge data (flat):`, JSON.stringify(challengeData, null, 2));
             
             console.log(`[HANDLE] Writing to Gun.js path: registrations/${registrationId}/challenges/${keypair.pub.substring(0, 16)}...`);
             try {
@@ -486,45 +467,52 @@ export class RegistrationManager {
             
             // Listen for solution
             const attested = new Set();
-            db.get('registrations').get(registrationId).get('solutions').on(async (solutions) => {
-                if (!solutions) return;
-                // Find a solution to one of our challenges
-                const ourChallengeIds = Object.keys(solutions).filter(k => k !== '_');
-                for (const challengeId of ourChallengeIds) {
-                    const solutionData = solutions[challengeId];
-                    if (!solutionData || !solutionData.solution) continue;
-                    if (attested.has(challengeId)) continue;
+            db.get('registrations').get(registrationId).get('solutions').map().on(async (rawSolution, solutionId) => {
+                if (!rawSolution || solutionId === '_' || attested.has(solutionId)) return;
 
-                    const verified = await PeerChallenge.verify(challenge, solutionData.solution);
-                    if (!verified) {
-                        console.log(`❌ Solution incorrect from ${registrationData.agentName}`);
-                        continue;
-                    }
+                // Explicitly fetch solution data
+                const solutionData = await new Promise(resolve => {
+                    db.get('registrations').get(registrationId).get('solutions').get(solutionId).once(data => resolve(data));
+                });
 
-                    // Sign an attestation with the validator's keypair so the
-                    // relay can verify *we* (this validator) approved this agent.
-                    const payload = {
-                        registrationId,
-                        agentPubKey: registrationData.agentPubKey,
-                        solution: solutionData.solution,
-                        challenge,
-                        validatorIP: validatorIP || 'unknown',
-                        issuedAt: Date.now()
-                    };
-                    const signature = await Gun.SEA.sign(payload, keypair);
+                if (!solutionData || !solutionData.solution || attested.has(solutionId)) return;
 
-                    db.get('registrations').get(registrationId).get('attestations').get(keypair.pub).put({
-                        validatorPubKey: keypair.pub,
-                        validatorIP: validatorIP || 'unknown',
-                        challenge,
-                        solution: solutionData.solution,
-                        signature,
-                        timestamp: Date.now()
-                    });
-
-                    attested.add(challengeId);
-                    console.log(`✅ Attestation signed for ${registrationData.agentName}`);
+                // Ensure we are checking a solution for OUR challenge
+                if (solutionId !== keypair.pub && solutionData.challengeId !== keypair.pub) {
+                    return;
                 }
+
+                const verified = await PeerChallenge.verify(challenge, solutionData.solution);
+                if (!verified) {
+                    console.log(`❌ Solution incorrect from ${registrationData.agentName}`);
+                    return;
+                }
+
+                // Sign an attestation with the validator's keypair.
+                // Include challenge details flat for easy reading by registrant.
+                const payload = {
+                    registrationId,
+                    agentPubKey: registrationData.agentPubKey,
+                    solution: solutionData.solution,
+                    challenge: JSON.parse(JSON.stringify(challenge)),
+                    validatorIP: validatorIP || 'unknown',
+                    issuedAt: Date.now()
+                };
+                const signature = await Gun.SEA.sign(payload, keypair);
+
+                db.get('registrations').get(registrationId).get('attestations').get(keypair.pub).put({
+                    validatorPubKey: keypair.pub,
+                    validatorIP: validatorIP || 'unknown',
+                    signature,
+                    solution: solutionData.solution,
+                    challengeType: challenge.type,
+                    challengeQuestion: challenge.question,
+                    challengeAnswer: challenge.answer,
+                    timestamp: Date.now()
+                });
+
+                attested.add(solutionId);
+                console.log(`✅ Attestation signed for ${registrationData.agentName}`);
             });
         }
     }
