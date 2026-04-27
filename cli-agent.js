@@ -11,7 +11,7 @@
  * 
  * Environment Variables:
  *   RELAY_URL - Hugging Face Space relay URL (e.g., wss://your-space.hf.space)
- *   RELAY_API_KEY - API key for relay authentication (default: dev-key-123)
+ *   RELAY_API_KEY - API key for relay authentication (default: demo-registration for new agents)
  */
 
 import Gun from 'gun';
@@ -27,8 +27,8 @@ const RELAY_CONFIG = {
     // Hugging Face Space URL from environment or empty for localhost only
     HF_RELAY_URL: process.env.RELAY_URL || '',
     
-    // API key from environment or dev default (will be overridden after registration)
-    API_KEY: process.env.RELAY_API_KEY || 'dev-key-123',
+    // API key from environment or demo-registration key (allows unregistered agents to broadcast registration requests)
+    API_KEY: process.env.RELAY_API_KEY || 'demo-registration',
     
     // Only use localhost if no HF relay is specified
     USE_LOCALHOST: !process.env.RELAY_URL,
