@@ -52,27 +52,36 @@ Return ONLY valid JSON with this structure:
 Be creative and avoid common questions. The question should test intelligence, not memorization.`;
 
         try {
+            const requestBody = {
+                model: this.model,
+                messages: [
+                    {
+                        role: 'system',
+                        content: 'You are a JSON generator. You MUST respond with ONLY valid JSON. No explanations, no markdown, no additional text.'
+                    },
+                    {
+                        role: 'user',
+                        content: prompt
+                    }
+                ],
+                temperature: 0.7,
+                max_tokens: 300
+            };
+            
+            // Try to use JSON mode if API supports it (OpenAI-compatible)
+            try {
+                requestBody.response_format = { type: 'json_object' };
+            } catch (e) {
+                // API might not support response_format, ignore
+            }
+            
             const response = await fetch(`${this.apiUrl}/chat/completions`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${this.apiKey}`
                 },
-                body: JSON.stringify({
-                    model: this.model,
-                    messages: [
-                        {
-                            role: 'system',
-                            content: 'You are a challenge generator for an AI agent network. Generate creative, fair, and solvable puzzles.'
-                        },
-                        {
-                            role: 'user',
-                            content: prompt
-                        }
-                    ],
-                    temperature: 0.9, // High creativity
-                    max_tokens: 300
-                })
+                body: JSON.stringify(requestBody)
             });
 
             if (!response.ok) {
@@ -85,23 +94,40 @@ Be creative and avoid common questions. The question should test intelligence, n
             const data = await response.json();
             const content = data.choices[0].message.content.trim();
             
-            // Clean up markdown code blocks if present
-            const jsonStr = content
-                .replace(/```json\n?/g, '')
-                .replace(/```\n?/g, '')
-                .trim();
+            // Try to extract JSON from the response
+            let jsonStr = content;
             
-            return JSON.parse(jsonStr);
+            // Remove markdown code blocks
+            jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+            
+            // Try to find JSON object in the text (in case LLM added explanation)
+            const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                jsonStr = jsonMatch[0];
+            }
+            
+            const parsed = JSON.parse(jsonStr);
+            
+            // Validate required fields
+            if (!parsed.question || !parsed.answer || !parsed.type) {
+                throw new Error('Missing required fields in generated challenge');
+            }
+            
+            return parsed;
         } catch (error) {
             console.error('❌ Failed to generate challenge:', error.message);
+            if (error.message.includes('Unexpected token')) {
+                console.error('   LLM returned non-JSON response. Using fallback challenge.');
+            }
             
-            // Fallback to hardcoded challenge
-            return {
-                question: 'What is 7 + 8?',
-                answer: '15',
-                type: 'math',
-                difficulty: 'easy'
-            };
+            // Fallback to hardcoded challenges (rotate through different types)
+            const fallbacks = [
+                { question: 'What is 7 + 8?', answer: '15', type: 'math', difficulty: 'easy' },
+                { question: 'What comes next in the sequence: 2, 4, 8, 16, ?', answer: '32', type: 'pattern', difficulty: 'medium' },
+                { question: 'If all roses are flowers and some flowers fade quickly, can we conclude that some roses fade quickly?', answer: 'no', type: 'logic', difficulty: 'medium' }
+            ];
+            
+            return fallbacks[Math.floor(Math.random() * fallbacks.length)];
         }
     }
 
