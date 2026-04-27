@@ -437,13 +437,14 @@ export class RegistrationManager {
             console.log(`[HANDLE] Calling PeerChallenge.generate()...`);
             let challenge;
             try {
-                challenge = PeerChallenge.generate();
+                challenge = await PeerChallenge.generate();  // ✅ Added await!
                 console.log(`[HANDLE] ✓ Challenge generated successfully`);
                 console.log(`[HANDLE]   Type: ${challenge.type}`);
                 console.log(`[HANDLE]   Question: ${challenge.question}`);
                 console.log(`[HANDLE]   Answer: ${challenge.answer}`);
             } catch (error) {
                 console.error(`[HANDLE] ❌ ERROR generating challenge:`, error);
+                console.error(`[HANDLE] Error stack:`, error.stack);
                 return;
             }
             
