@@ -282,7 +282,6 @@ export class RegistrationManager {
                 console.log(`   ⏭️  Already processed ${registrationId}`);
                 return;
             }
-            processedRegistrations.add(registrationId);
             
             console.log(`\n🚨 NEW REGISTRATION DETECTED: ${registrationId}`);
             console.log(`   Agent: ${registrationData.agentName}`);
@@ -291,6 +290,7 @@ export class RegistrationManager {
             // Don't validate our own registration
             if (registrationData.agentPubKey === keypair.pub) {
                 console.log(`   ⏭️  Skipping own registration`);
+                processedRegistrations.add(registrationId);
                 return;
             }
             
@@ -303,6 +303,7 @@ export class RegistrationManager {
             
             if (existingChallenge) {
                 console.log(`   ⏭️  Already challenged this registration`);
+                processedRegistrations.add(registrationId);
                 return;
             }
             
@@ -320,6 +321,10 @@ export class RegistrationManager {
             };
             
             db.get('registrations').get(registrationId).get('challenges').get(keypair.pub).put(challengeData);
+            
+            // Mark as processed only AFTER successfully issuing challenge
+            processedRegistrations.add(registrationId);
+            console.log(`✅ Challenge issued successfully`);
             
             // Listen for solution
             const attested = new Set();
