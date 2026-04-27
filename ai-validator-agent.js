@@ -285,10 +285,33 @@ class SmartAIAgent {
     }
 
     async start() {
+        // Test relay connection before starting
+        console.log(`🔌 Testing connection to relay: ${this.relayUrl}...`);
+        
+        try {
+            const response = await fetch(`${this.relayUrl}/health`, {
+                method: 'GET',
+                timeout: 10000
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Relay returned status ${response.status}`);
+            }
+            
+            console.log(`✅ Relay connection successful\n`);
+        } catch (error) {
+            console.error(`❌ CANNOT CONNECT TO RELAY: ${this.relayUrl}`);
+            console.error(`   Error: ${error.message}`);
+            console.error(`\n🛑 Validator will not start without relay connection`);
+            console.error(`   Please check if the relay server is running:\n`);
+            console.error(`   ${this.relayUrl}/health\n`);
+            process.exit(1);
+        }
+
         console.log(`👁️  Now acting as AI validator for new registrations...\n`);
 
         // Use existing validator pattern but with AI challenges
-        RegistrationManager.actAsValidator(
+        await RegistrationManager.actAsValidator(
             this.gun,
             this.db,
             this.name,
@@ -306,10 +329,9 @@ class SmartAIAgent {
                 pub: this.keypair.pub,
                 lastSeen: Date.now()
             });
-            console.log(`💓 Heartbeat published`);
         }, 60000);
 
-        console.log(`🚀 Smart AI agent running - validates using LLM-generated challenges\n`);
+        console.log(`🚀 Validator running\n`);
     }
 }
 
