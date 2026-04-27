@@ -223,6 +223,20 @@ export class RegistrationManager {
      * Act as validator - issue challenges to new registrations
      */
     static async actAsValidator(gun, db, agentName, keypair, validatorIP, PeerChallenge) {
+        console.log('\n╔════════════════════════════════════════════════════════════════╗');
+        console.log('║              VALIDATOR INITIALIZATION                          ║');
+        console.log('╚════════════════════════════════════════════════════════════════╝');
+        console.log(`[INIT] Validator Name: ${agentName}`);
+        console.log(`[INIT] Validator PubKey: ${keypair.pub}`);
+        console.log(`[INIT] Validator PubKey (short): ${keypair.pub.substring(0, 20)}...`);
+        console.log(`[INIT] Validator IP: ${validatorIP || 'unknown'}`);
+        console.log(`[INIT] Gun instance:`, gun ? 'AVAILABLE' : 'NULL');
+        console.log(`[INIT] DB instance:`, db ? 'AVAILABLE' : 'NULL');
+        console.log(`[INIT] PeerChallenge class:`, PeerChallenge ? 'AVAILABLE' : 'NULL');
+        console.log(`[INIT] Listening path: db.get('registrations').map()`);
+        console.log(`[INIT] Polling interval: 10000ms (10 seconds)`);
+        console.log(`[INIT] Starting validation service...\n`);
+        
         console.log('👁️  Watching for new agent registrations to validate...');
         console.log(`🔍 Validator: ${agentName} (${keypair.pub.substring(0, 16)}...)`);
         console.log(`📡 Listening on: registrations/*`);
@@ -232,106 +246,211 @@ export class RegistrationManager {
         
         // Active polling (Gun.js .map().on() doesn't reliably work over relays)
         const pollRegistrations = async () => {
-            console.log(`[POLL] Checking for new registrations...`);
+            console.log(`\n[POLL] ===================== POLLING CYCLE START =====================`);
+            console.log(`[POLL] Timestamp: ${new Date().toISOString()}`);
+            console.log(`[POLL] Current processedRegistrations.size: ${processedRegistrations.size}`);
+            console.log(`[POLL] Querying: db.get('registrations').once()...`);
+            
+            const pollTimeout = setTimeout(() => {
+                console.error(`[POLL] ⚠️  Gun.js poll query timeout after 10 seconds!`);
+            }, 10000);
             
             db.get('registrations').once(async (registrations) => {
+                clearTimeout(pollTimeout);
+                console.log(`[POLL] ✓ Gun.js query returned`);
+                
                 if (!registrations) {
-                    console.log(`[POLL] No registrations node found`);
+                    console.log(`[POLL] ❌ No registrations node found (null/undefined)`);
                     return;
                 }
                 
-                const regIds = Object.keys(registrations).filter(k => k !== '_');
-                console.log(`[POLL] Found ${regIds.length} registration(s): ${regIds.join(', ')}`);
+                console.log(`[POLL] Parsing registration IDs from response...`);
+                const allKeys = Object.keys(registrations);
+                console.log(`[POLL] Total keys in object: ${allKeys.length}`);
+                console.log(`[POLL] All keys:`, allKeys);
+                
+                const regIds = allKeys.filter(k => k !== '_');
+                console.log(`[POLL] ✓ Found ${regIds.length} registration(s) (excluding Gun metadata)`);
+                console.log(`[POLL] Registration IDs: ${regIds.join(', ')}`);
                 
                 let processedCount = 0;
                 let skippedCount = 0;
+                let invalidCount = 0;
                 
                 for (const registrationId of regIds) {
+                    console.log(`\n[POLL] --- Examining ${registrationId} ---`);
                     const registrationData = registrations[registrationId];
+                    
                     if (!registrationData || typeof registrationData !== 'object') {
-                        console.log(`[POLL] ⏭️  Skipping ${registrationId}: invalid data`);
+                        console.log(`[POLL] ⏭️  Invalid data type:`, typeof registrationData);
+                        invalidCount++;
                         continue;
                     }
+                    
+                    console.log(`[POLL] Data keys:`, Object.keys(registrationData));
+                    console.log(`[POLL] status: ${registrationData.status}`);
+                    console.log(`[POLL] agentName: ${registrationData.agentName}`);
+                    console.log(`[POLL] agentPubKey: ${registrationData.agentPubKey ? registrationData.agentPubKey.substring(0, 20) + '...' : 'MISSING'}`);
+                    console.log(`[POLL] timestamp: ${registrationData.timestamp ? new Date(registrationData.timestamp).toISOString() : 'MISSING'}`);
+                    
                     if (processedRegistrations.has(registrationId)) {
+                        console.log(`[POLL] ⏭️  Already in processedRegistrations Set`);
                         skippedCount++;
                         continue;
                     }
                     
-                    console.log(`[POLL] 📋 Processing ${registrationId}:`, { 
-                        status: registrationData.status,
-                        agentName: registrationData.agentName,
-                        agentPubKey: registrationData.agentPubKey?.substring(0, 16) + '...'
-                    });
+                    console.log(`[POLL] 📋 NEW - will process this registration`);
                     
                     if (registrationData.status === 'pending' && registrationData.agentPubKey) {
-                        await handleRegistration(registrationId, registrationData);
-                        processedCount++;
+                        console.log(`[POLL] ✓ Status is 'pending' and has agentPubKey`);
+                        console.log(`[POLL] 🔄 Calling handleRegistration()...`);
+                        try {
+                            await handleRegistration(registrationId, registrationData);
+                            processedCount++;
+                            console.log(`[POLL] ✓ handleRegistration() completed for ${registrationId}`);
+                        } catch (error) {
+                            console.error(`[POLL] ❌ ERROR in handleRegistration():`, error);
+                            console.error(`[POLL] Error stack:`, error.stack);
+                        }
                     } else {
-                        console.log(`[POLL] ⏭️  Skipping ${registrationId}: status=${registrationData.status}, hasPubKey=${!!registrationData.agentPubKey}`);
+                        console.log(`[POLL] ⏭️  Skipping: status='${registrationData.status}', hasPubKey=${!!registrationData.agentPubKey}`);
+                        // Don't add to processedRegistrations - allow retry if status changes
                     }
                 }
                 
-                console.log(`[POLL] ✅ Processed ${processedCount}, skipped ${skippedCount} already-handled registrations`);
+                console.log(`\n[POLL] ===================== POLLING CYCLE END =====================`);
+                console.log(`[POLL] Summary: processed=${processedCount}, skipped=${skippedCount}, invalid=${invalidCount}`);
+                console.log(`[POLL] processedRegistrations.size now: ${processedRegistrations.size}`);
             });
         };
         
         // Poll every 10 seconds
+        console.log(`[INIT] Setting up polling interval (every 10 seconds)...`);
         setInterval(pollRegistrations, 10000);
+        console.log(`[INIT] Starting initial poll immediately...`);
         pollRegistrations(); // Initial poll
         
         // Also keep .map().on() as backup
+        console.log(`[INIT] Setting up .map().on() event listener as backup...`);
         db.get('registrations').map().on(async (registrationData, registrationId) => {
-            console.log(`[EVENT] Registration event:`, { registrationId, status: registrationData?.status, hasPubKey: !!registrationData?.agentPubKey });
+            console.log(`\n[EVENT] ==================== EVENT TRIGGERED ====================`);
+            console.log(`[EVENT] Registration ID: ${registrationId}`);
+            console.log(`[EVENT] Timestamp: ${new Date().toISOString()}`);
+            console.log(`[EVENT] Data received:`, registrationData ? JSON.stringify(registrationData, null, 2) : 'NULL');
+            console.log(`[EVENT] status: ${registrationData?.status}`);
+            console.log(`[EVENT] hasPubKey: ${!!registrationData?.agentPubKey}`);
+            console.log(`[EVENT] agentName: ${registrationData?.agentName}`);
             
-            if (!registrationData || !registrationData.agentPubKey || registrationData.status !== 'pending') {
-                console.log(`[EVENT] ⏭️  Skipping ${registrationId}: incomplete data or not pending`);
+            if (!registrationData) {
+                console.log(`[EVENT] ⏭️  Skipping: registrationData is null/undefined`);
                 return;
             }
+            
+            if (!registrationData.agentPubKey) {
+                console.log(`[EVENT] ⏭️  Skipping: agentPubKey is missing`);
+                console.log(`[EVENT]    Available keys:`, Object.keys(registrationData));
+                return;
+            }
+            
+            if (registrationData.status !== 'pending') {
+                console.log(`[EVENT] ⏭️  Skipping: status is '${registrationData.status}' (not 'pending')`);
+                return;
+            }
+            
+            console.log(`[EVENT] ✓ Data validation passed`);
             
             if (processedRegistrations.has(registrationId)) {
-                console.log(`[EVENT] ⏭️  Already processed ${registrationId}`);
+                console.log(`[EVENT] ⏭️  Already in processedRegistrations Set (size: ${processedRegistrations.size})`);
                 return;
             }
             
-            console.log(`[EVENT] 🔄 Calling handleRegistration for ${registrationId}`);
-            await handleRegistration(registrationId, registrationData);
+            console.log(`[EVENT] ✓ Not yet processed`);
+            console.log(`[EVENT] 🔄 Calling handleRegistration()...`);
+            
+            try {
+                await handleRegistration(registrationId, registrationData);
+                console.log(`[EVENT] ✓ handleRegistration() completed successfully`);
+            } catch (error) {
+                console.error(`[EVENT] ❌ ERROR in handleRegistration():`, error);
+                console.error(`[EVENT] Error stack:`, error.stack);
+            }
+            
+            console.log(`[EVENT] ==================== EVENT FINISHED ====================\n`);
         });
         
+        console.log(`[INIT] ✓ Event listener registered`);
+        console.log(`[INIT] Validator is now watching for registrations...`);
+        
         async function handleRegistration(registrationId, registrationData) {
+            console.log(`\n[HANDLE] ==================== STARTING handleRegistration ====================`);
+            console.log(`[HANDLE] Registration ID: ${registrationId}`);
+            console.log(`[HANDLE] Registration Data:`, JSON.stringify(registrationData, null, 2));
+            
             if (processedRegistrations.has(registrationId)) {
-                console.log(`   ⏭️  Already processed ${registrationId}`);
+                console.log(`[HANDLE] ⏭️  Already in processedRegistrations Set, exiting`);
                 return;
             }
+            console.log(`[HANDLE] ✓ Not in processedRegistrations Set yet`);
             
             console.log(`\n🚨 NEW REGISTRATION DETECTED: ${registrationId}`);
             console.log(`   Agent: ${registrationData.agentName}`);
             console.log(`   PubKey: ${registrationData.agentPubKey.substring(0, 16)}...`);
+            console.log(`   Timestamp: ${new Date(registrationData.timestamp).toISOString()}`);
             
             // Don't validate our own registration
+            console.log(`[HANDLE] Checking if this is our own registration...`);
+            console.log(`[HANDLE]   Our pubkey: ${keypair.pub.substring(0, 16)}...`);
+            console.log(`[HANDLE]   Their pubkey: ${registrationData.agentPubKey.substring(0, 16)}...`);
             if (registrationData.agentPubKey === keypair.pub) {
-                console.log(`   ⏭️  Skipping own registration`);
+                console.log(`[HANDLE] ⏭️  This is our own registration, skipping`);
                 processedRegistrations.add(registrationId);
                 return;
             }
+            console.log(`[HANDLE] ✓ Not our own registration, continuing`);
             
             // Check if we already issued a challenge for this registration
+            console.log(`[HANDLE] Checking for existing challenge...`);
+            console.log(`[HANDLE]   Path: registrations/${registrationId}/challenges/${keypair.pub.substring(0, 16)}...`);
             const existingChallenge = await new Promise(resolve => {
+                setTimeout(() => {
+                    console.log(`[HANDLE] ⚠️  Gun.js query timeout after 5 seconds`);
+                    resolve(null);
+                }, 5000);
+                
                 db.get('registrations').get(registrationId).get('challenges').get(keypair.pub).once(data => {
+                    console.log(`[HANDLE] Gun.js query returned:`, data ? 'HAS DATA' : 'NULL');
+                    if (data) {
+                        console.log(`[HANDLE]   Existing challenge data:`, JSON.stringify(data, null, 2));
+                    }
                     resolve(data);
                 });
             });
             
             if (existingChallenge) {
-                console.log(`   ⏭️  Already challenged this registration`);
+                console.log(`[HANDLE] ⏭️  Already challenged this registration previously`);
                 processedRegistrations.add(registrationId);
                 return;
             }
+            console.log(`[HANDLE] ✓ No existing challenge found, will create new one`);
             
             // Generate challenge
-            const challenge = PeerChallenge.generate();
+            console.log(`[HANDLE] Calling PeerChallenge.generate()...`);
+            let challenge;
+            try {
+                challenge = PeerChallenge.generate();
+                console.log(`[HANDLE] ✓ Challenge generated successfully`);
+                console.log(`[HANDLE]   Type: ${challenge.type}`);
+                console.log(`[HANDLE]   Question: ${challenge.question}`);
+                console.log(`[HANDLE]   Answer: ${challenge.answer}`);
+            } catch (error) {
+                console.error(`[HANDLE] ❌ ERROR generating challenge:`, error);
+                return;
+            }
+            
             console.log(`🎯 Issuing challenge (${challenge.type}): ${challenge.question}`);
             
             // Post challenge
+            console.log(`[HANDLE] Building challengeData object...`);
             const challengeData = {
                 validatorName: agentName,
                 validatorPubKey: keypair.pub,
@@ -339,12 +458,30 @@ export class RegistrationManager {
                 challenge: challenge,
                 timestamp: Date.now()
             };
+            console.log(`[HANDLE] Challenge data:`, JSON.stringify(challengeData, null, 2));
             
-            db.get('registrations').get(registrationId).get('challenges').get(keypair.pub).put(challengeData);
+            console.log(`[HANDLE] Writing to Gun.js path: registrations/${registrationId}/challenges/${keypair.pub.substring(0, 16)}...`);
+            try {
+                db.get('registrations').get(registrationId).get('challenges').get(keypair.pub).put(challengeData, (ack) => {
+                    console.log(`[HANDLE] Gun.js .put() acknowledgment:`, ack);
+                    if (ack.err) {
+                        console.error(`[HANDLE] ❌ Gun.js returned error:`, ack.err);
+                    } else {
+                        console.log(`[HANDLE] ✓ Gun.js write acknowledged successfully`);
+                    }
+                });
+                console.log(`[HANDLE] ✓ Gun.js .put() called (waiting for acknowledgment...)`);
+            } catch (error) {
+                console.error(`[HANDLE] ❌ ERROR calling Gun.js .put():`, error);
+                return;
+            }
             
             // Mark as processed only AFTER successfully issuing challenge
+            console.log(`[HANDLE] Adding ${registrationId} to processedRegistrations Set`);
             processedRegistrations.add(registrationId);
+            console.log(`[HANDLE] processedRegistrations now has ${processedRegistrations.size} entries`);
             console.log(`✅ Challenge issued successfully`);
+            console.log(`[HANDLE] ==================== FINISHED handleRegistration ====================\n`);
             
             // Listen for solution
             const attested = new Set();
