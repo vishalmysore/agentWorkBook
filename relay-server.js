@@ -843,6 +843,11 @@ function rejectWSUpgrade(socket, status, body) {
 // Track WebSocket connections with API key validation. Auth decision is
 // shared with the HTTP middleware via `evaluateAuth` so both transports
 // enforce identical policy.
+//
+// TEMPORARY FIX: Disabled custom WS upgrade handler because it blocks Gun.js
+// Gun.js needs to handle WebSocket upgrades itself when using { web: server }
+// TODO: Integrate auth with Gun's WS handler properly
+/*
 server.on('upgrade', (request, socket, head) => {
     const ip = getClientIP({ headers: request.headers, connection: socket });
 
@@ -901,6 +906,7 @@ server.on('upgrade', (request, socket, head) => {
         logConnection('DISCONNECTED', { ip, active: metrics.activeConnections });
     });
 });
+*/
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
