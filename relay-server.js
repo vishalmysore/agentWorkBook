@@ -807,7 +807,7 @@ app.post('/validator/heartbeat', authenticateAPIKey, express.json(), (req, res) 
     const apiKey = req.apiKey;
     
     // Only accept heartbeats from validator keys
-    if (!metrics.isValidatorKey(apiKey)) {
+    if (!isValidatorKey(apiKey)) {
         return res.status(403).json({ error: 'Only validator keys can send heartbeats' });
     }
     
