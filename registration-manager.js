@@ -104,8 +104,56 @@ export class RegistrationManager {
         // Listen for challenges from validators
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
+                console.log(`\n❌ Registration timeout after ${this.CHALLENGE_TIMEOUT/1000}s`);
+                console.log(`📊 Challenges received: ${this.receivedChallenges.length}`);
+                console.log(`📊 Validations collected: ${this.solvedChallenges.length}/${this.REQUIRED_VALIDATIONS}`);
                 reject(new Error('Registration timeout - not enough validators responded'));
             }, this.CHALLENGE_TIMEOUT);
+            
+            // Add polling as backup (Gun.js events can be unreliable)
+            let pollCount = 0;
+            const pollInterval = setInterval(async () => {
+                pollCount++;
+                if (pollCount % 6 === 0) { // Every 30 seconds
+                    console.log(`\n🔄 Polling for challenges (${pollCount * 5}s elapsed)...`);
+                    console.log(`   Received so far: ${this.receivedChallenges.length} challenges`);
+                    console.log(`   Validations: ${this.solvedChallenges.length}/${this.REQUIRED_VALIDATIONS}`);
+                }
+                
+                // Explicit poll for challenges
+                db.get('registrations').get(this.registrationId).get('challenges').once((challengesNode) => {
+                    if (!challengesNode || typeof challengesNode !== 'object') return;
+                    
+                    Object.keys(challengesNode).forEach(async (key) => {
+                        if (key === '_' || this.receivedChallenges.includes(key)) return;
+                        
+                        const challengeData = challengesNode[key];
+                        if (!challengeData || !challengeData.challenge) return;
+                        
+                        console.log(`\n🎯 Challenge found via polling from: ${challengeData.validatorName || 'Unknown'}`);
+                        this.receivedChallenges.push(key);
+                        
+                        console.log(`   Type: ${challengeData.challenge.type}`);
+                        console.log(`   Question: ${challengeData.challenge.question}`);
+
+                        const solution = await PeerChallenge.solve(challengeData.challenge);
+                        const verified = await PeerChallenge.verify(challengeData.challenge, solution);
+                        if (!verified) {
+                            console.error('❌ Challenge solve failed - internal verification error');
+                            return;
+                        }
+                        console.log(`✅ Challenge solved: "${solution}"`);
+
+                        // Post solution back
+                        db.get('registrations').get(this.registrationId).get('solutions').get(key).put({
+                            challengeId: key,
+                            solution,
+                            agentPubKey: this.keypair.pub,
+                            timestamp: Date.now()
+                        });
+                    });
+                });
+            }, 5000); // Poll every 5 seconds
 
             // Watch for challenges and post solutions
             db.get('registrations').get(this.registrationId).get('challenges').map().on(async (challengeData, challengeId) => {
@@ -165,6 +213,7 @@ export class RegistrationManager {
 
                 if (this.solvedChallenges.length >= this.REQUIRED_VALIDATIONS) {
                     clearTimeout(timeout);
+                    clearInterval(pollInterval);
                     console.log('\n🎉 Collected sufficient validations! Submitting to relay server...');
                     try {
                         const apiKey = await this.submitRegistration();
