@@ -324,6 +324,9 @@ class SmartAIAgent {
             process.exit(1);
         }
 
+        // Send initial heartbeat to register as active validator
+        await this.sendHeartbeat();
+
         console.log(`👁️  Now acting as AI validator for new registrations...\n`);
 
         // Use existing validator pattern but with AI challenges
@@ -336,7 +339,7 @@ class SmartAIAgent {
             this.aiChallenge  // Pass AI challenge generator instead of hardcoded
         );
 
-        // Publish heartbeat
+        // Publish heartbeat to Gun.js and relay server
         setInterval(() => {
             this.db.get('agents').get(this.name).put({
                 name: this.name,
@@ -345,9 +348,37 @@ class SmartAIAgent {
                 pub: this.keypair.pub,
                 lastSeen: Date.now()
             });
+            // Also send heartbeat to relay to track active validators
+            this.sendHeartbeat().catch(err => console.error(`Heartbeat failed: ${err.message}`));
         }, 60000);
 
         console.log(`🚀 Validator running\n`);
+    }
+
+    async sendHeartbeat() {
+        try {
+            const response = await fetch(`${this.relayUrl}/validator/heartbeat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-API-Key': this.apiKey
+                },
+                body: JSON.stringify({
+                    name: this.name,
+                    timestamp: Date.now()
+                })
+            });
+
+            if (!response.ok) {
+                console.error(`❌ Heartbeat failed: ${response.status} ${response.statusText}`);
+                return;
+            }
+
+            const result = await response.json();
+            console.log(`💓 Heartbeat sent - ${result.activeValidators} validators online`);
+        } catch (error) {
+            console.error(`❌ Heartbeat error: ${error.message}`);
+        }
     }
 }
 

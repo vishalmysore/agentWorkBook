@@ -120,8 +120,18 @@ const metrics = {
     blockedAuth: 0,
     rateLimitHits: 0,
     bytesTransferred: 0,
-    connectionsByIP: new Map()
+    connectionsByIP: new Map(),
+    activeValidators: new Set(), // Track active validator API keys
+    validatorConnections: new Map() // Map apiKey -> count of connections
 };
+
+// Helper: Check if an API key belongs to a validator
+function isValidatorKey(apiKey) {
+    // Check if it's a bootstrap key or the master validator key
+    return apiKey === VALIDATOR_MASTER_KEY || 
+           apiKey.startsWith('agent-bootstrap') ||
+           /^agent-bootstrap\d+$/.test(apiKey);
+}
 
 // Per-key rate limiting system
 const keyRateLimits = {
@@ -716,7 +726,7 @@ app.get('/info', (req, res) => {
                 timeout: '5 minutes',
                 challengeTypes: ['math', 'logic', 'code']
             },
-            activeValidators: metrics.activeConnections // Estimate based on connections
+            activeValidators: metrics.activeValidators.size // Actual count of validator keys connected
         },
         endpoints: {
             dashboard: relayURL + '/',
@@ -792,6 +802,44 @@ app.get('/metrics', (req, res) => {
 });
 
 // Check remaining messages for API key+IP combination
+// Validator heartbeat endpoint - validators call this to register themselves
+app.post('/validator/heartbeat', authenticateAPIKey, express.json(), (req, res) => {
+    const apiKey = req.apiKey;
+    
+    // Only accept heartbeats from validator keys
+    if (!metrics.isValidatorKey(apiKey)) {
+        return res.status(403).json({ error: 'Only validator keys can send heartbeats' });
+    }
+    
+    // Add validator to active set and update last seen timestamp
+    metrics.activeValidators.add(apiKey);
+    metrics.validatorConnections.set(apiKey, {
+        lastSeen: Date.now(),
+        ip: getClientIP(req)
+    });
+    
+    console.log(`[VALIDATOR] Heartbeat received from ${apiKey.substring(0, 20)}...`);
+    
+    res.json({ 
+        success: true,
+        activeValidators: metrics.activeValidators.size
+    });
+});
+
+// Clean up stale validators (no heartbeat for 5 minutes)
+setInterval(() => {
+    const now = Date.now();
+    const STALE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
+    
+    for (const [apiKey, info] of metrics.validatorConnections.entries()) {
+        if (now - info.lastSeen > STALE_THRESHOLD) {
+            console.log(`[VALIDATOR] Removing stale validator ${apiKey.substring(0, 20)}... (last seen ${Math.floor((now - info.lastSeen) / 1000)}s ago)`);
+            metrics.activeValidators.delete(apiKey);
+            metrics.validatorConnections.delete(apiKey);
+        }
+    }
+}, 60 * 1000); // Check every minute
+
 app.get('/quota', authenticateAPIKey, (req, res) => {
     const apiKey = req.apiKey;
     const ip = getClientIP(req);
