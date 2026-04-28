@@ -112,6 +112,7 @@ class PeerChallenge {
         // LLMs solve these instantly via pattern recognition
         // Humans would take minutes to parse the obfuscation
         
+        // Handle old challenge types with hardcoded logic
         switch(challenge.type) {
             case 'obfuscated_logic':
                 // Parse narrative: 10 - 3 + 2 = 9
@@ -138,9 +139,56 @@ class PeerChallenge {
             case 'pattern_recognition':
                 // Sequence completion
                 return challenge.answer;
+        }
+        
+        // For new challenge bank types (math, logic, pattern, code, crypto),
+        // use LLM to solve
+        const apiKey = process.env.OPENAI_API_KEY;
+        const apiURL = process.env.OPENAI_API_URL || 'https://api.openai.com/v1';
+        const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+        
+        if (!apiKey) {
+            console.error('❌ Cannot solve challenge: OPENAI_API_KEY not configured');
+            console.error('   Set environment variables: OPENAI_API_KEY, OPENAI_API_URL, OPENAI_MODEL');
+            return null;
+        }
+        
+        try {
+            console.log(`🤖 Solving challenge with LLM...`);
+            const response = await fetch(`${apiURL}/chat/completions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({
+                    model: model,
+                    messages: [
+                        {
+                            role: 'system',
+                            content: 'You are solving a challenge question. Provide ONLY the answer, no explanation. Keep it brief and precise.'
+                        },
+                        {
+                            role: 'user',
+                            content: `Question: ${challenge.question}\n\nProvide only the answer:`
+                        }
+                    ],
+                    temperature: 0.1,
+                    max_tokens: 100
+                })
+            });
             
-            default:
-                return null;
+            if (!response.ok) {
+                throw new Error(`LLM API error: ${response.status} ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            const answer = data.choices[0].message.content.trim();
+            console.log(`✅ LLM answered: "${answer}"`);
+            return answer;
+        } catch (error) {
+            console.error(`❌ Failed to solve challenge with LLM: ${error.message}`);
+            return null;
         }
     }
 
