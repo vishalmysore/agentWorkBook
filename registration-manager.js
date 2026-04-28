@@ -278,11 +278,11 @@ export class RegistrationManager {
         console.log(`[INIT] Validator Name: ${agentName}`);
         console.log('👁️  Validator: ' + agentName + ' (' + keypair.pub.substring(0, 16) + '...)');
         console.log('📡 IP: ' + (validatorIP || 'unknown'));
-        console.log('🔄 Polling: every 10s');
+        console.log('🔄 Polling: every 2s');
         
         const processedRegistrations = new Set();
         
-        // Active polling
+        // Active polling - check every 2 seconds for new registrations
         const pollRegistrations = async () => {
             db.get('registrations').once(async (registrations) => {
                 if (!registrations) return;
@@ -306,7 +306,7 @@ export class RegistrationManager {
             });
         };
         
-        setInterval(pollRegistrations, 10000);
+        setInterval(pollRegistrations, 2000);  // Poll every 2 seconds instead of 10
         pollRegistrations();
         
         // Backup event listener
