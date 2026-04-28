@@ -23,6 +23,7 @@ import 'gun/lib/radisk.js';
 import 'gun/lib/store.js';
 import 'gun/lib/rindexed.js';
 import { RegistrationManager } from './registration-manager.js';
+import { getRandomChallenge } from './challenge-bank.js';
 
 // LLM Client for generating challenges
 class LLMClient {
@@ -189,13 +190,27 @@ Provide ONLY the answer - no explanation, no extra text. Just the answer.`;
     }
 }
 
-// AI-Powered Challenge Generator (replaces hardcoded PeerChallenge)
+// AI-Powered Challenge Generator with Static Challenge Bank
 class AIPeerChallenge {
-    constructor(llmClient) {
+    constructor(llmClient, useLLMMode = false) {
         this.llm = llmClient;
+        this.useLLMMode = useLLMMode; // Flag to toggle between static and LLM-generated challenges
+        console.log(`🎯 Challenge Mode: ${useLLMMode ? 'LLM-Generated (Dynamic)' : 'Static Bank (500 preloaded)'}`);  
     }
 
     async generate() {
+        // Use static challenge bank by default (no API calls, no rate limits)
+        if (!this.useLLMMode) {
+            const challenge = getRandomChallenge();
+            return {
+                type: challenge.type,
+                question: challenge.question,
+                answer: challenge.answer
+            };
+        }
+        
+        // LLM mode: Generate dynamic challenges (may hit rate limits)
+        console.log('🤖 Generating LLM challenge...');
         const challenge = await this.llm.generateChallenge('medium');
         return {
             type: challenge.type,
@@ -205,7 +220,7 @@ class AIPeerChallenge {
     }
 
     async solve(challenge) {
-        // Use LLM to solve the challenge
+        // Always use LLM to solve challenges
         return await this.llm.solveChallenge(challenge.question, challenge.type);
     }
 
@@ -217,10 +232,11 @@ class AIPeerChallenge {
 
 // Smart AI Agent (Registers itself, then validates others)
 class SmartAIAgent {
-    constructor(name, llmClient, relayUrl) {
+    constructor(name, llmClient, relayUrl, useLLMMode = false) {
         this.name = name;
         this.llm = llmClient;
         this.relayUrl = relayUrl;
+        this.useLLMMode = useLLMMode; // Toggle between static and LLM-generated challenges
         this.keypair = null;
         this.gun = null;
         this.db = null;
@@ -236,8 +252,8 @@ class SmartAIAgent {
         this.keypair = await Gun.SEA.pair();
         console.log(`🔑 Public Key: ${this.keypair.pub.substring(0, 20)}...`);
 
-        // Create AI challenge generator
-        this.aiChallenge = new AIPeerChallenge(this.llm);
+        // Create AI challenge generator with mode setting
+        this.aiChallenge = new AIPeerChallenge(this.llm, this.useLLMMode);
 
         // Check for master validator key first (highest priority)
         const masterKey = process.env.VALIDATOR_MASTER_KEY || process.env.RELAY_API_KEY;
@@ -343,7 +359,8 @@ function parseArgs() {
         openaiUrl: process.env.OPENAI_API_URL || 'https://api.openai.com/v1',
         model: process.env.OPENAI_MODEL || 'gpt-4',
         apiKey: process.env.OPENAI_API_KEY,
-        relayUrl: process.env.RELAY_URL || 'https://vishalmysore-agentworkbookrelayserver.hf.space'
+        relayUrl: process.env.RELAY_URL || 'https://vishalmysore-agentworkbookrelayserver.hf.space',
+        useLLMMode: false // Default: use static challenge bank
     };
 
     for (let i = 0; i < args.length; i++) {
@@ -363,6 +380,10 @@ function parseArgs() {
             case '--relay-url':
                 config.relayUrl = args[++i];
                 break;
+            case '--llm-mode':
+                config.useLLMMode = true;
+                console.log('🤖 LLM Mode ENABLED: Will generate dynamic challenges using LLM');
+                break;
             case '--help':
                 console.log(`
 Smart AI Agent - Self-Registering Validator with LLM
@@ -370,7 +391,7 @@ Smart AI Agent - Self-Registering Validator with LLM
 This is a SMART AGENT that:
 1. Registers itself by solving challenges from other smart agents
 2. Receives API key from 3 validators  
-3. Acts as validator using AI-generated challenges
+3. Acts as validator using challenges (static bank by default)
 
 Usage:
   node ai-validator-agent.js [options]
@@ -381,6 +402,7 @@ Options:
   --model <model>         LLM model (default: gpt-4)
   --api-key <key>         OpenAI API key (or env: OPENAI_API_KEY)
   --relay-url <url>       Gun.js relay URL (or env: RELAY_URL)
+  --llm-mode              Use LLM for dynamic challenge generation (default: static bank)
   --help                  Show this help
 
 Environment Variables:
@@ -389,11 +411,25 @@ Environment Variables:
   OPENAI_API_KEY          OpenAI API key
   RELAY_URL               Gun.js relay server URL
 
+Challenge Modes:
+  Default (Static Bank):  Uses 500 pre-loaded complex questions
+                         - No API calls, no rate limits
+                         - Instant response
+                         - Questions designed for AI agents
+  
+  LLM Mode (--llm-mode): Generates dynamic challenges using LLM
+                         - Unique questions every time
+                         - May hit rate limits
+                         - Requires API credits
+
 Examples:
-  # Basic usage with OpenAI
+  # Basic usage with static challenges (recommended, no rate limits)
   node ai-validator-agent.js --name SmartAI1 --api-key sk-...
 
-  # NVIDIA Nemotron
+  # With LLM-generated dynamic challenges
+  node ai-validator-agent.js --name SmartAI1 --api-key sk-... --llm-mode
+
+  # NVIDIA Nemotron with static challenges
   node ai-validator-agent.js \\
     --name NVIDIAAgent \\
     --openai-url https://integrate.api.nvidia.com/v1 \\
@@ -442,19 +478,25 @@ async function main() {
         console.log('✅ LLM connection verified\n');
     }
 
-    // Test challenge generation
-    console.log('🎯 Testing challenge generation...');
-    const testChallenge = await llm.generateChallenge('easy');
-    console.log(`   Question: ${testChallenge.question}`);
-    console.log(`   Type: ${testChallenge.type}`);
-    console.log(`   (Answer: ${testChallenge.answer})`);
-    console.log('✅ Challenge generation working!\n');
+    // Only test challenge generation in LLM mode (avoid unnecessary API calls)
+    if (config.useLLMMode) {
+        console.log('🎯 Testing LLM challenge generation...');
+        const testChallenge = await llm.generateChallenge('easy');
+        console.log(`   Question: ${testChallenge.question}`);
+        console.log(`   Type: ${testChallenge.type}`);
+        console.log(`   (Answer: ${testChallenge.answer})`);
+        console.log('✅ Challenge generation working!\n');
+    } else {
+        console.log('📦 Using static challenge bank (500 preloaded questions)');
+        console.log('   ⚡ No API calls for challenges = No rate limits\n');
+    }
 
     // Initialize smart agent
     const agent = new SmartAIAgent(
         config.name,
         llm,
-        config.relayUrl
+        config.relayUrl,
+        config.useLLMMode  // Pass LLM mode flag
     );
 
     await agent.initialize();
