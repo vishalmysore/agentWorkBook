@@ -283,30 +283,24 @@ export class RegistrationManager {
         const processedRegistrations = new Set();
         
         // Active polling - check every 2 seconds for new registrations
+        // Use .map() to bypass Gun's cache and get fresh data each time
         const pollRegistrations = async () => {
-            db.get('registrations').once(async (registrations) => {
-                if (!registrations) return;
+            db.get('registrations').map().once(async (registrationData, registrationId) => {
+                if (!registrationData || typeof registrationData !== 'object') return;
+                if (registrationId === '_') return;
+                if (processedRegistrations.has(registrationId)) return;
+                if (registrationData.status !== 'pending') return;
+                if (!registrationData.agentPubKey) return;
                 
-                const regIds = Object.keys(registrations).filter(k => k !== '_');
-                
-                for (const registrationId of regIds) {
-                    const registrationData = registrations[registrationId];
-                    
-                    if (!registrationData || typeof registrationData !== 'object') continue;
-                    if (processedRegistrations.has(registrationId)) continue;
-                    
-                    if (registrationData.status === 'pending' && registrationData.agentPubKey) {
-                        try {
-                            await handleRegistration(registrationId, registrationData);
-                        } catch (error) {
-                            console.error('❌ Error handling registration:', error.message);
-                        }
-                    }
+                try {
+                    await handleRegistration(registrationId, registrationData);
+                } catch (error) {
+                    console.error('❌ Error handling registration:', error.message);
                 }
             });
         };
         
-        setInterval(pollRegistrations, 2000);  // Poll every 2 seconds instead of 10
+        setInterval(pollRegistrations, 2000);  // Poll every 2 seconds
         pollRegistrations();
         
         // Backup event listener
