@@ -329,10 +329,21 @@ class SmartAIAgent {
 
         console.log(`👁️  Now acting as AI validator for new registrations...\n`);
 
+        // Create separate Gun connection for monitoring registrations
+        // Agents register on demo-registration channel, validators must listen there
+        const registrationGun = Gun({
+            peers: [`${this.relayUrl}/gun?key=demo-registration`],
+            radisk: false
+        });
+        const registrationDb = registrationGun.get('agentworkbook-v1');
+
+        console.log(`📡 Listening for registrations on shared channel: demo-registration\n`);
+
         // Use existing validator pattern but with AI challenges
+        // Listen on the shared registration channel
         await RegistrationManager.actAsValidator(
-            this.gun,
-            this.db,
+            registrationGun,
+            registrationDb,
             this.name,
             this.keypair,
             'auto-detect',

@@ -674,8 +674,8 @@ async function main() {
         console.log('💡 New to this? Check: AGENT-ONBOARDING.md for full guide\n');
         console.log('⚙️  Starting registration process...\n');
         
-        // Initialize Gun temporarily for registration (with guest/temp access)
-        const tempPeerURLs = buildPeerURLs('registration-temp-key');
+        // Initialize Gun temporarily for registration (with shared demo channel)
+        const tempPeerURLs = buildPeerURLs('demo-registration');
         gun = Gun({
             peers: tempPeerURLs.length > 0 ? tempPeerURLs : [],
             radisk: true,
