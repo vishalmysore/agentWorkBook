@@ -300,8 +300,6 @@ export class RegistrationManager {
         // Gun.js is "lazy" and connections go dormant without activity
         // This forces Gun to maintain an active connection to receive .on() events
         const keepAlive = () => {
-            // Re-add peers to force reconnection
-            db.opt({ peers: db._.opt.peers });
             // Put a heartbeat to wake up Gun's sync
             db.get('validator-heartbeat').get(validatorId).put({
                 timestamp: Date.now(),
