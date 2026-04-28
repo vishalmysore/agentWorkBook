@@ -128,16 +128,27 @@ export class RegistrationManager {
                         if (key === '_' || this.receivedChallenges.includes(key)) return;
                         
                         const challengeData = challengesNode[key];
-                        if (!challengeData || !challengeData.challenge) return;
+                        if (!challengeData || !challengeData.validatorName) return;
                         
                         console.log(`\n🎯 Challenge found via polling from: ${challengeData.validatorName || 'Unknown'}`);
                         this.receivedChallenges.push(key);
-                        
-                        console.log(`   Type: ${challengeData.challenge.type}`);
-                        console.log(`   Question: ${challengeData.challenge.question}`);
 
-                        const solution = await PeerChallenge.solve(challengeData.challenge);
-                        const verified = await PeerChallenge.verify(challengeData.challenge, solution);
+                        // Support both flat format (new) and nested format (old validators)
+                        let challenge;
+                        if (challengeData.challengeType) {
+                            challenge = { type: challengeData.challengeType, question: challengeData.challengeQuestion, answer: challengeData.challengeAnswer, difficulty: challengeData.challengeDifficulty };
+                        } else {
+                            challenge = await new Promise(resolve => {
+                                db.get('registrations').get(this.registrationId).get('challenges').get(key).get('challenge').once(c => resolve(c));
+                                setTimeout(() => resolve(null), 5000);
+                            });
+                        }
+                        if (!challenge || !challenge.type) { console.error('\u274c Could not read challenge data'); return; }
+
+                        console.log(`   Type: ${challenge.type}`);
+                        console.log(`   Question: ${challenge.question}`);
+                        const solution = await PeerChallenge.solve(challenge);
+                        const verified = await PeerChallenge.verify(challenge, solution);
                         if (!verified) {
                             console.error('❌ Challenge solve failed - internal verification error');
                             return;
@@ -157,17 +168,30 @@ export class RegistrationManager {
 
             // Watch for challenges and post solutions
             db.get('registrations').get(this.registrationId).get('challenges').map().on(async (challengeData, challengeId) => {
-                if (!challengeData || !challengeData.challenge) return;
+                if (!challengeData || !challengeData.validatorName) return;
 
                 if (this.receivedChallenges.includes(challengeId)) return;
                 this.receivedChallenges.push(challengeId);
 
                 console.log(`\n🎯 Challenge received from validator: ${challengeData.validatorName || 'Unknown'}`);
-                console.log(`   Type: ${challengeData.challenge.type}`);
-                console.log(`   Question: ${challengeData.challenge.question}`);
 
-                const solution = await PeerChallenge.solve(challengeData.challenge);
-                const verified = await PeerChallenge.verify(challengeData.challenge, solution);
+                // Support both flat format (new) and nested format (old validators)
+                let challenge;
+                if (challengeData.challengeType) {
+                    challenge = { type: challengeData.challengeType, question: challengeData.challengeQuestion, answer: challengeData.challengeAnswer, difficulty: challengeData.challengeDifficulty };
+                } else {
+                    challenge = await new Promise(resolve => {
+                        db.get('registrations').get(this.registrationId).get('challenges').get(challengeId).get('challenge').once(c => resolve(c));
+                        setTimeout(() => resolve(null), 5000);
+                    });
+                }
+                if (!challenge || !challenge.type) { console.error('\u274c Could not read challenge data'); return; }
+
+                console.log(`   Type: ${challenge.type}`);
+                console.log(`   Question: ${challenge.question}`);
+
+                const solution = await PeerChallenge.solve(challenge);
+                const verified = await PeerChallenge.verify(challenge, solution);
                 if (!verified) {
                     console.error('❌ Challenge solve failed - internal verification error');
                     return;
@@ -203,7 +227,7 @@ export class RegistrationManager {
                     validatorPubKey,
                     validatorIP: attestation.validatorIP || 'unknown',
                     challengeProof: {
-                        challenge: attestation.challenge,
+                        challenge: { type: attestation.challengeType, question: attestation.challengeQuestion },
                         solution: attestation.solution,
                         signature: attestation.signature
                     }
@@ -288,6 +312,7 @@ export class RegistrationManager {
             if (!registrationData || !registrationData.agentPubKey) return;
             if (registrationData.status !== 'pending') return;
             if (processedRegistrations.has(registrationId)) return;
+            processedRegistrations.add(registrationId); // Add immediately - prevent race condition
             
             try {
                 await handleRegistration(registrationId, registrationData);
@@ -314,8 +339,6 @@ export class RegistrationManager {
         console.log('✅ Validator started\n');
         
         async function handleRegistration(registrationId, registrationData) {
-            if (processedRegistrations.has(registrationId)) return;
-            
             console.log('🚨 New registration: ' + registrationData.agentName + ' (' + registrationId + ')');
             
             // Skip own registration
@@ -350,30 +373,35 @@ export class RegistrationManager {
                 validatorName: agentName,
                 validatorPubKey: keypair.pub,
                 validatorIP: validatorIP || 'unknown',
-                challenge: challenge,
+                challengeType: challenge.type,
+                challengeQuestion: challenge.question,
+                challengeAnswer: challenge.answer,
+                challengeDifficulty: challenge.difficulty || '',
                 timestamp: Date.now()
             };
             
-            db.get('registrations').get(registrationId).get('challenges').get(keypair.pub).put(challengeData);
-            processedRegistrations.add(registrationId);
+            // Wait for write to propagate to relay
+            await new Promise(resolve => {
+                db.get('registrations').get(registrationId).get('challenges').get(keypair.pub).put(challengeData, ack => {
+                    if (ack.err) console.error('❌ Challenge write failed:', ack.err);
+                    resolve();
+                });
+                setTimeout(resolve, 3000); // Fallback if no ACK
+            });
             console.log('✅ Challenge issued\n');
             
-            // Listen for solution
+            // Listen for solution using .map().on() to avoid Gun.js soul reference issues
             const attested = new Set();
-            db.get('registrations').get(registrationId).get('solutions').on(async (solutions) => {
-                if (!solutions) return;
-                // Find a solution to one of our challenges
-                const ourChallengeIds = Object.keys(solutions).filter(k => k !== '_');
-                for (const challengeId of ourChallengeIds) {
-                    const solutionData = solutions[challengeId];
-                    if (!solutionData || !solutionData.solution) continue;
-                    if (attested.has(challengeId)) continue;
+            db.get('registrations').get(registrationId).get('solutions').map().on(async (solutionData, challengeId) => {
+                if (!solutionData || !solutionData.solution) return;
+                if (attested.has(challengeId)) return;
+                attested.add(challengeId);
 
-                    const verified = await PeerChallenge.verify(challenge, solutionData.solution);
-                    if (!verified) {
-                        console.log(`❌ Solution incorrect from ${registrationData.agentName}`);
-                        continue;
-                    }
+                const verified = await PeerChallenge.verify(challenge, solutionData.solution);
+                if (!verified) {
+                    console.log(`❌ Solution incorrect from ${registrationData.agentName}`);
+                    return;
+                }
 
                     // Sign an attestation with the validator's keypair so the
                     // relay can verify *we* (this validator) approved this agent.
@@ -387,18 +415,20 @@ export class RegistrationManager {
                     };
                     const signature = await Gun.SEA.sign(payload, keypair);
 
+                await new Promise(resolve => {
                     db.get('registrations').get(registrationId).get('attestations').get(keypair.pub).put({
                         validatorPubKey: keypair.pub,
                         validatorIP: validatorIP || 'unknown',
-                        challenge,
+                        challengeType: challenge.type,
+                        challengeQuestion: challenge.question,
                         solution: solutionData.solution,
                         signature,
                         timestamp: Date.now()
-                    });
+                    }, ack => { if (ack.err) console.error('❌ Attestation write failed:', ack.err); resolve(); });
+                    setTimeout(resolve, 3000);
+                });
 
-                    attested.add(challengeId);
-                    console.log(`✅ Attestation signed for ${registrationData.agentName}`);
-                }
+                console.log(`✅ Attestation signed for ${registrationData.agentName}`);
             });
         }
     }
