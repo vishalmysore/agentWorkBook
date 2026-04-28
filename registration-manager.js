@@ -301,9 +301,9 @@ export class RegistrationManager {
         // This forces Gun to maintain an active connection to receive .on() events
         const keepAlive = () => {
             // Put a heartbeat to wake up Gun's sync
-            db.get('validator-heartbeat').get(validatorId).put({
+            db.get('validator-heartbeat').get(agentName).put({
                 timestamp: Date.now(),
-                validatorId
+                validatorId: agentName
             });
         };
         
