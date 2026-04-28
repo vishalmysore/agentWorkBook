@@ -121,8 +121,8 @@ const metrics = {
     rateLimitHits: 0,
     bytesTransferred: 0,
     connectionsByIP: new Map(),
-    activeValidators: new Set(), // Track active validator API keys
-    validatorConnections: new Map() // Map apiKey -> count of connections
+    activeValidators: new Set(), // Track active validators by apiKey+IP combination
+    validatorConnections: new Map() // Map "apiKey:ip" -> {lastSeen, apiKey, ip}
 };
 
 // Helper: Check if an API key belongs to a validator
@@ -805,20 +805,23 @@ app.get('/metrics', (req, res) => {
 // Validator heartbeat endpoint - validators call this to register themselves
 app.post('/validator/heartbeat', authenticateAPIKey, express.json(), (req, res) => {
     const apiKey = req.apiKey;
+    const ip = getClientIP(req);
     
     // Only accept heartbeats from validator keys
     if (!isValidatorKey(apiKey)) {
         return res.status(403).json({ error: 'Only validator keys can send heartbeats' });
     }
     
-    // Add validator to active set and update last seen timestamp
-    metrics.activeValidators.add(apiKey);
-    metrics.validatorConnections.set(apiKey, {
+    // Track validator by apiKey+IP combination (allows multiple validators with same master key on different IPs)
+    const validatorId = `${apiKey}:${ip}`;
+    metrics.activeValidators.add(validatorId);
+    metrics.validatorConnections.set(validatorId, {
         lastSeen: Date.now(),
-        ip: getClientIP(req)
+        apiKey: apiKey,
+        ip: ip
     });
     
-    console.log(`[VALIDATOR] Heartbeat received from ${apiKey.substring(0, 20)}...`);
+    console.log(`[VALIDATOR] Heartbeat received from ${apiKey.substring(0, 20)}... (IP: ${ip})`);
     
     res.json({ 
         success: true,
@@ -831,11 +834,11 @@ setInterval(() => {
     const now = Date.now();
     const STALE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
     
-    for (const [apiKey, info] of metrics.validatorConnections.entries()) {
+    for (const [validatorId, info] of metrics.validatorConnections.entries()) {
         if (now - info.lastSeen > STALE_THRESHOLD) {
-            console.log(`[VALIDATOR] Removing stale validator ${apiKey.substring(0, 20)}... (last seen ${Math.floor((now - info.lastSeen) / 1000)}s ago)`);
-            metrics.activeValidators.delete(apiKey);
-            metrics.validatorConnections.delete(apiKey);
+            console.log(`[VALIDATOR] Removing stale validator ${info.apiKey.substring(0, 20)}... from ${info.ip} (last seen ${Math.floor((now - info.lastSeen) / 1000)}s ago)`);
+            metrics.activeValidators.delete(validatorId);
+            metrics.validatorConnections.delete(validatorId);
         }
     }
 }, 60 * 1000); // Check every minute
