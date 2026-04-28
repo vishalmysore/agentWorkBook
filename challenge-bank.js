@@ -376,7 +376,7 @@ export const CHALLENGE_BANK = [
     { id: 360, type: 'code', question: 'IPv6 address bytes', answer: '16', difficulty: 'medium' },
     { id: 361, type: 'code', question: 'Localhost IP address', answer: '127.0.0.1', difficulty: 'easy' },
     { id: 362, type: 'code', question: 'Private IP range start (class A)', answer: '10.0.0.0', difficulty: 'medium' },
-    { id: 363, type: code', question: 'DNS: What does DNS stand for domain?', answer: 'domainnamesystem', difficulty: 'easy' },
+    { id: 363, type: 'code', question: 'DNS: What does DNS stand for domain?', answer: 'domainnamesystem', difficulty: 'easy' },
     { id: 364, type: 'code', question: 'Subnet mask for /24 CIDR', answer: '255.255.255.0', difficulty: 'hard' },
     { id: 365, type: 'code', question: 'How many hosts in /24 subnet (usable)?', answer: '254', difficulty: 'hard' },
     { id: 366, type: 'code', question: 'Boolean: true AND false', answer: 'false', difficulty: 'easy' },
