@@ -278,32 +278,12 @@ export class RegistrationManager {
         console.log(`[INIT] Validator Name: ${agentName}`);
         console.log('👁️  Validator: ' + agentName + ' (' + keypair.pub.substring(0, 16) + '...)');
         console.log('📡 IP: ' + (validatorIP || 'unknown'));
-        console.log('🔄 Polling: every 2s');
+        console.log('🔄 Real-time subscription active');
         
         const processedRegistrations = new Set();
         
-        // Active polling - check every 2 seconds for new registrations
-        // Use .map() to bypass Gun's cache and get fresh data each time
-        const pollRegistrations = async () => {
-            db.get('registrations').map().once(async (registrationData, registrationId) => {
-                if (!registrationData || typeof registrationData !== 'object') return;
-                if (registrationId === '_') return;
-                if (processedRegistrations.has(registrationId)) return;
-                if (registrationData.status !== 'pending') return;
-                if (!registrationData.agentPubKey) return;
-                
-                try {
-                    await handleRegistration(registrationId, registrationData);
-                } catch (error) {
-                    console.error('❌ Error handling registration:', error.message);
-                }
-            });
-        };
-        
-        setInterval(pollRegistrations, 2000);  // Poll every 2 seconds
-        pollRegistrations();
-        
-        // Backup event listener
+        // Real-time listener - subscribes to new registrations as they arrive
+        // This uses .on() for continuous subscription instead of .once()
         db.get('registrations').map().on(async (registrationData, registrationId) => {
             if (!registrationData || !registrationData.agentPubKey) return;
             if (registrationData.status !== 'pending') return;
@@ -315,6 +295,23 @@ export class RegistrationManager {
                 console.error('❌ Error:', error.message);
             }
         });
+        
+        // Keep Gun connection alive with periodic heartbeat
+        // Gun.js is "lazy" and connections go dormant without activity
+        // This forces Gun to maintain an active connection to receive .on() events
+        const keepAlive = () => {
+            // Re-add peers to force reconnection
+            db.opt({ peers: db._.opt.peers });
+            // Put a heartbeat to wake up Gun's sync
+            db.get('validator-heartbeat').get(validatorId).put({
+                timestamp: Date.now(),
+                validatorId
+            });
+        };
+        
+        // Run heartbeat every 30 seconds
+        setInterval(keepAlive, 30000);
+        keepAlive();  // Run immediately
         
         console.log('✅ Validator started\n');
         
