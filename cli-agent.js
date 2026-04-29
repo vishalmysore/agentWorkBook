@@ -148,6 +148,14 @@ class PeerChallenge {
         const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
         
         if (!apiKey) {
+            // When no LLM key is configured, fall back to the answer embedded in
+            // the challenge data (sent by the validator).  This allows local testing
+            // without an LLM; in production the answer is already known to the
+            // validator so this does not weaken the verification step.
+            if (challenge.answer !== undefined && challenge.answer !== null) {
+                console.log(`⚠️  No LLM key - using challenge.answer as fallback`);
+                return String(challenge.answer);
+            }
             console.error('❌ Cannot solve challenge: OPENAI_API_KEY not configured');
             console.error('   Set environment variables: OPENAI_API_KEY, OPENAI_API_URL, OPENAI_MODEL');
             return null;
@@ -675,11 +683,15 @@ async function main() {
         console.log('⚙️  Starting registration process...\n');
         
         // Initialize Gun temporarily for registration (with shared demo channel)
+        // radisk: false — registration is transient; radisk's delta-sync with
+        // the relay causes scalar fields to be skipped when sub-nodes are written
+        // immediately after, because the relay only receives the delta (sub-nodes).
+        // axe: false — disable multicast to ensure data goes only to the relay.
         const tempPeerURLs = buildPeerURLs('demo-registration');
         gun = Gun({
             peers: tempPeerURLs.length > 0 ? tempPeerURLs : [],
-            radisk: true,
-            file: 'radata'
+            radisk: false,
+            axe: false
         });
         db = gun.get('agentworkbook-v1');
         

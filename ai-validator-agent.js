@@ -331,9 +331,11 @@ class SmartAIAgent {
 
         // Create separate Gun connection for monitoring registrations
         // Agents register on demo-registration channel, validators must listen there
+        // axe: false — disable multicast so all traffic goes through the relay WebSocket
         const registrationGun = Gun({
             peers: [`${this.relayUrl}/gun?key=demo-registration`],
-            radisk: false
+            radisk: false,
+            axe: false
         });
         const registrationDb = registrationGun.get('agentworkbook-v1');
 
@@ -341,12 +343,13 @@ class SmartAIAgent {
 
         // Use existing validator pattern but with AI challenges
         // Listen on the shared registration channel
+        const validatorIP = process.env.VALIDATOR_IP || 'auto-detect';
         await RegistrationManager.actAsValidator(
             registrationGun,
             registrationDb,
             this.name,
             this.keypair,
-            'auto-detect',
+            validatorIP,
             this.aiChallenge  // Pass AI challenge generator instead of hardcoded
         );
 

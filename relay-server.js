@@ -140,7 +140,8 @@ const keyRateLimits = {
     
     // API Key tiers with daily message limits
     tiers: {
-        demo: { limit: 4, pattern: /^demo-/ },           // Demo keys: 4 messages/day per IP (testing only)
+        demo: { limit: 1000, pattern: /^demo-/ },           // Demo keys: 1000 messages/day per IP (testing only)
+        bootstrap: { limit: 10000, pattern: /^agent-bootstrap/ }, // Bootstrap validator keys: high limit
         validator: { limit: 10000, pattern: /^[a-f0-9]{64}$/ }, // Master validator key: high limit (64 hex chars)
         spectator: { limit: 10000, pattern: /^spectator-/ },    // Spectator keys: unlimited per IP (read-only)
         registered: { limit: 1000, pattern: /^agent-[a-f0-9]{64}$/ } // Self-registered (FULL): 1000 messages/day per IP

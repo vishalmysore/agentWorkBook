@@ -76,25 +76,43 @@ export class RegistrationManager {
         this.registrationId = `reg-${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
         // Announce registration to network
-        const registrationData = {
-            id: this.registrationId,
-            agentName: this.agentName,
-            agentPubKey: this.keypair.pub,
-            timestamp: Date.now(),
-            status: 'pending',
-            challenges: {},
-            solutions: {},
-            attestations: {}
-        };
+        // Gun.js struggles to sync scalars and nested objects in the same .put().
+        // Split: write scalar fields first, then create sub-nodes separately so
+        // both reach the relay reliably.
+        const regNode = db.get('registrations').get(this.registrationId);
 
         console.log(`📡 Broadcasting registration request (ID: ${this.registrationId})`);
         console.log(`🔑 Agent PubKey: ${this.keypair.pub.substring(0, 20)}...`);
         console.log(`📍 Writing to path: agentworkbook-v1/registrations/${this.registrationId}\n`);
-        
-        db.get('registrations').get(this.registrationId).put(registrationData);
-        
-        // Give Gun.js time to sync to relay
+
+        // With radisk:false the Gun WebSocket connect is async — wait for the
+        // connection to be fully established before putting so the scalar fields
+        // are sent directly over the live socket instead of queued and possibly lost.
         await new Promise(resolve => setTimeout(resolve, 2000));
+        console.log('🔗 WebSocket connection ready, writing registration...');
+
+        // Step 1: scalar fields only
+        await new Promise(resolve => {
+            regNode.put({
+                id: this.registrationId,
+                agentName: this.agentName,
+                agentPubKey: this.keypair.pub,
+                timestamp: Date.now(),
+                status: 'pending'
+            }, ack => {
+                if (ack.err) console.error('❌ Registration scalar write error:', ack.err);
+                resolve();
+            });
+            setTimeout(resolve, 3000);
+        });
+
+        // Step 2: initialise sub-nodes so validators can write challenges/solutions/attestations
+        regNode.get('challenges').put({});
+        regNode.get('solutions').put({});
+        regNode.get('attestations').put({});
+
+        // Give Gun.js time to propagate to relay
+        await new Promise(resolve => setTimeout(resolve, 1000));
         console.log('✅ Registration data synced to network\n');
 
         // Track which validators have already produced an attestation we accepted,
@@ -262,18 +280,35 @@ export class RegistrationManager {
         };
         
         console.log(`\n📤 Submitting registration to: ${this.relayURL}/register`);
+        console.log(`📦 Payload: agentName=${registrationPayload.agentName}, pubKey=${registrationPayload.agentPubKey.substring(0,20)}..., validations=${registrationPayload.validations.length}`);
+        if (registrationPayload.validations.length > 0) {
+            const v = registrationPayload.validations[0];
+            console.log(`   First validation: validatorPubKey=${v.validatorPubKey ? v.validatorPubKey.substring(0,20)+'...' : 'MISSING'}, challengeProof keys=${v.challengeProof ? Object.keys(v.challengeProof).join(',') : 'MISSING'}`);
+        }
         
-        const response = await fetch(`${this.relayURL}/register`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(registrationPayload)
-        });
+        const controller = new AbortController();
+        const fetchTimeout = setTimeout(() => controller.abort(), 30000); // 30s timeout
+        
+        let response;
+        try {
+            response = await fetch(`${this.relayURL}/register`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(registrationPayload),
+                signal: controller.signal
+            });
+        } catch (err) {
+            clearTimeout(fetchTimeout);
+            throw new Error(`Registration request failed: ${err.message}`);
+        }
+        clearTimeout(fetchTimeout);
         
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(`Registration failed: ${error.error || response.statusText}`);
+            const errorText = await response.text();
+            console.error(`❌ Relay responded ${response.status}: ${errorText}`);
+            let errMsg;
+            try { errMsg = JSON.parse(errorText).error || response.statusText; } catch { errMsg = errorText || response.statusText; }
+            throw new Error(`Registration failed: ${errMsg}`);
         }
         
         const result = await response.json();
