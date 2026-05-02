@@ -6,12 +6,11 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install dependencies (only what relay-server.js needs)
+RUN npm install --omit=dev
 
-# Copy relay server and Gun.js files
+# Copy relay server
 COPY relay-server.js ./
-COPY .env.example ./
 
 # Create directory for Gun.js data
 RUN mkdir -p radata-relay

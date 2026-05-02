@@ -1,381 +1,116 @@
-import Gun from 'gun';
-import 'gun/sea';
+﻿import Gun from 'gun';
 
-// Relay configuration
-// For local development: uses localhost relay with dev API key
-// For production (GitHub Pages): uses Hugging Face Space with spectator API key
-const RELAY_CONFIG = {
-    // Hugging Face Space relay URL (deployed)
-    HF_RELAY_URL: 'wss://vishalmysore-agentworkbookrelayserver.hf.space',
-    
-    // Public spectator API key for read-only browser dashboard
-    // This is intentionally public - browser dashboard only reads data, cannot write
-    // CLI agents need their own keys from registration system
-    API_KEY: 'spectator-public-readonly',
-    
-    // Detect if running locally or on GitHub Pages
-    isLocal: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-};
-
-// Build peer URLs with API keys
-function buildPeerURLs() {
-    const peers = [];
-    
-    // Always use Hugging Face Space relay (production and local dev)
-    if (RELAY_CONFIG.HF_RELAY_URL) {
-        peers.push(`${RELAY_CONFIG.HF_RELAY_URL}/gun?key=${RELAY_CONFIG.API_KEY}`);
-    }
-    
-    return peers;
-}
-
-// Initialize Gun.js with secure relay
-const peerURLs = buildPeerURLs();
-console.log('🔌 Connecting to relays:', peerURLs);
-console.log('📡 Gun.js Configuration:', {
-    peers: peerURLs.map(u => u.replace(/key=[^&]*/, 'key=***')),
-    radisk: true,
-    localStorage: true,
-    relay: RELAY_CONFIG.HF_RELAY_URL || 'localhost'
-});
+// Connect to the relay — no API key required
+const RELAY_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? 'http://localhost:8765'
+    : 'wss://vishalmysore-agentworkbookrelayserver.hf.space';
 
 const gun = Gun({
-    peers: peerURLs.length > 0 ? peerURLs : [], // Will use WebRTC if no peers
-    radisk: true,
-    localStorage: true
+    peers: [`${RELAY_URL}/gun`],
+    radisk: false
 });
 
-const db = gun.get('agentworkbook-v1');
-console.log('✅ Gun.js initialized, database namespace: agentworkbook-v1');
+const db = gun.get('agentworkbook-simple');
 
-// Global state for spectating
-let peerCount = 0;
-let issues = {};
-let agents = {};
-let posts = {};
-let currentFilter = 'all';
-let currentPostFilter = 'all';
+console.log(`Connected to relay: ${RELAY_URL}/gun`);
 
-// UI Elements
-const elements = {
-    issuesContainer: document.getElementById('issues-container'),
-    postsContainer: document.getElementById('posts-container'),
-    activityLog: document.getElementById('activity-log'),
-    connectionStatus: document.getElementById('connection-status'),
-    peerCount: document.getElementById('peer-count'),
-    agentsList: document.getElementById('agents-list'),
-    totalIssues: document.getElementById('total-issues'),
-    openIssues: document.getElementById('open-issues'),
-    closedIssues: document.getElementById('closed-issues'),
-    activeAgents: document.getElementById('active-agents')
-};
+// ---- State ----
+let agents   = {};
+let messages = [];
+const MAX_MESSAGES = 100;
 
-// Initialize - Subscribe to P2P network as spectator
-subscribeToNetwork();
+// ---- DOM helpers ----
+function qs(id) { return document.getElementById(id); }
 
-// Subscribe to P2P network (read-only)
-function subscribeToNetwork() {
-    console.log('🔭 Starting spectator mode - subscribing to P2P network...');
-    addLog('🔭 Spectator mode: Watching agent activity...', 'info');
-    
-    // Listen for issues
-    console.log('👂 Subscribing to issues namespace: db.get("issues").map()');
-    db.get('issues').map().on((data, key) => {
-        console.log('📦 Gun.js sync - issues update:', { key, data });
-        
-        if (data && data.id) {
-            const isNew = !issues[data.id];
-            issues[data.id] = data;
-            renderIssues();
-            updateStats();
-            
-            if (isNew) {
-                const logMsg = `📬 New issue created by ${data.createdBy}: "${data.title}"`;
-                console.log(logMsg + ` [Status: ${data.status}, Points: ${data.points}]`);
-                addLog(logMsg, 'info');
-            } else if (data.assignedTo) {
-                const logMsg = `👤 Issue "${data.title}" assigned to ${data.assignedTo}`;
-                console.log(logMsg + ` [Previous assignee: ${issues[data.id].assignedTo || 'none'}]`);
-                addLog(logMsg, 'info');
-            } else {
-                console.log(`🔄 Issue updated: "${data.title}" [Status: ${data.status}]`);
-            }
-        }
-    });
-
-    // Listen for active agents
-    console.log('👂 Subscribing to agents namespace: db.get("agents").map()');
-    db.get('agents').map().on((data, key) => {
-        console.log('📦 Gun.js sync - agents update:', { key, data });
-        
-        if (data && data.agent) {
-            const isNew = !agents[data.agent];
-            agents[data.agent] = data;
-            renderAgents();
-            updateStats();
-            
-            if (isNew) {
-                console.log(`🤖 New agent joined: ${data.agent} [Role: ${data.role}]`);
-                addLog(`🤖 Agent ${data.agent} joined the network`, 'success');
-            } else {
-                console.log(`💓 Agent heartbeat: ${data.agent} [Active: ${data.active}]`);
-            }
-        }
-    });
-
-    // Listen for knowledge board posts with throttling
-    console.log('👂 Subscribing to knowledge-board namespace: db.get("knowledge-board").map()');
-    
-    let renderTimeout;
-    const throttledRender = () => {
-        if (renderTimeout) clearTimeout(renderTimeout);
-        renderTimeout = setTimeout(() => renderPosts(), 100); // Throttle to 100ms
-    };
-    
-    db.get('knowledge-board').map().on((data, key) => {
-        console.log('📦 Gun.js sync - knowledge-board update:', { key, data });
-        
-        if (data && data.id) {
-            const isNew = !posts[data.id];
-            posts[data.id] = data;
-            throttledRender();
-            
-            if (isNew) {
-                const upvotes = data.upvoteCount || 0;
-                const downvotes = data.downvoteCount || 0;
-                const logMsg = `📚 New ${data.type} post by ${data.author}: "${data.title}"`;
-                console.log(logMsg + ` [Type: ${data.type}, Score: +${upvotes}/-${downvotes}]`);
-                addLog(logMsg, 'info');
-            } else {
-                console.log(`👍 Post "${data.title}" updated [Up: ${data.upvoteCount || 0}, Down: ${data.downvoteCount || 0}]`);
-            }
-        }
-    });
-
-    // Connection status
-    gun.on('hi', peer => {
-        peerCount++;
-        elements.connectionStatus.textContent = 'Connected';
-        elements.connectionStatus.classList.add('connected');
-        elements.peerCount.textContent = `Peers: ${peerCount}`;
-        console.log(`🌐 Connected to peer:`, peer);
-        console.log(`📊 Total peers connected: ${peerCount}`);
-        addLog(`🌐 Connected to peer network`, 'success');
-    });
-
-    gun.on('bye', peer => {
-        peerCount = Math.max(0, peerCount - 1);
-        elements.peerCount.textContent = `Peers: ${peerCount}`;
-        console.log(`👋 Peer disconnected:`, peer);
-        console.log(`📊 Total peers connected: ${peerCount}`);
-    });
-    
-    // Additional Gun.js event logging
-    gun.on('create', soul => {
-        console.log('📝 Gun.js CREATE event:', soul);
-    });
-    
-    gun.on('auth', ack => {
-        console.log('🔐 Gun.js AUTH event:', ack);
-    });
-    
-    console.log('✅ Subscription setup complete - waiting for P2P data...');
+function addLog(text, type = 'info') {
+    const log   = qs('activity-log');
+    const entry = document.createElement('p');
+    entry.className = `log-entry ${type}`;
+    entry.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+    log.prepend(entry);
+    // Keep log from growing unbounded in the DOM
+    while (log.children.length > 200) log.lastChild.remove();
 }
 
-// Render active agents
 function renderAgents() {
-    const agentsList = Object.values(agents).filter(agent => {
-        // Consider agent active if heartbeat within last 60 seconds
-        return agent.active && (Date.now() - agent.timestamp < 60000);
-    });
+    const list = qs('agents-list');
+    const active = Object.values(agents).filter(a => Date.now() - a.lastSeen < 90_000);
+    qs('active-agents').textContent = active.length;
 
-    if (agentsList.length === 0) {
-        elements.agentsList.innerHTML = '<p class="empty-state">No agents connected yet...</p>';
+    if (active.length === 0) {
+        list.innerHTML = '<p class="empty-state">No agents connected yet...</p>';
         return;
     }
 
-    elements.agentsList.innerHTML = agentsList.map(agent => `
+    list.innerHTML = active.map(a => `
         <div class="agent-card">
-            <div class="agent-card-header">
-                <div class="agent-name">🤖 ${escapeHtml(agent.agent)}</div>
-                <div class="agent-role">${escapeHtml(agent.role)}</div>
-            </div>
-            <div class="agent-meta">
-                Last seen: ${getTimeAgo(agent.timestamp)}
-            </div>
+            <div class="agent-name">🤖 ${escapeHtml(a.name)}</div>
+            <div class="agent-role">${escapeHtml(a.role)}</div>
         </div>
     `).join('');
 }
 
-// Update statistics
-function updateStats() {
-    const issuesList = Object.values(issues);
-    const agentsList = Object.values(agents).filter(agent => 
-        agent.active && (Date.now() - agent.timestamp < 60000)
-    );
+function renderMessages() {
+    const container = qs('posts-container');
 
-    elements.totalIssues.textContent = issuesList.length;
-    elements.openIssues.textContent = issuesList.filter(i => i.status === 'open').length;
-    elements.closedIssues.textContent = issuesList.filter(i => i.status === 'closed').length;
-    elements.activeAgents.textContent = agentsList.length;
-}
-
-// Render issues
-function renderIssues() {
-    const issuesList = Object.values(issues).filter(issue => {
-        if (currentFilter === 'all') return true;
-        return issue.status === currentFilter;
-    });
-
-    if (issuesList.length === 0) {
-        elements.issuesContainer.innerHTML = '<p class="empty-state">No issues match the current filter.</p>';
+    if (messages.length === 0) {
+        container.innerHTML = '<p class="empty-state">No messages yet — start some agents!</p>';
         return;
     }
 
-    // Sort by created date (newest first)
-    issuesList.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-    elements.issuesContainer.innerHTML = issuesList.map(issue => `
-        <div class="issue-card">
-            <div class="issue-header">
-                <div class="issue-title">${escapeHtml(issue.title)}</div>
-                <div class="issue-points">${issue.points} pts</div>
-            </div>
-            <div class="issue-description">${escapeHtml(issue.description || 'No description')}</div>
-            <div class="issue-meta">
-                <span class="issue-status ${issue.status}">${issue.status}</span>
-                <span>Created by: ${escapeHtml(issue.createdBy)}</span>
-                ${issue.assignedTo ? `<span>Assigned to: ${escapeHtml(issue.assignedTo)}</span>` : ''}
-                ${issue.reviewedBy ? `<span>Reviewed by: ${escapeHtml(issue.reviewedBy)}</span>` : ''}
-            </div>
-        </div>
-    `).join('');
-}
-
-// Render knowledge board posts
-function renderPosts() {
-    const postsList = Object.values(posts).filter(post => {
-        if (currentPostFilter === 'all') return true;
-        return post.type === currentPostFilter;
-    });
-
-    if (postsList.length === 0) {
-        elements.postsContainer.innerHTML = '<p class="empty-state">No posts match the current filter.</p>';
-        return;
-    }
-
-    // Sort by score (upvotes - downvotes), then by date (newest first)
-    postsList.sort((a, b) => {
-        const scoreA = (a.upvoteCount || 0) - (a.downvoteCount || 0);
-        const scoreB = (b.upvoteCount || 0) - (b.downvoteCount || 0);
-        if (scoreB !== scoreA) return scoreB - scoreA;
-        return new Date(b.createdAt) - new Date(a.createdAt);
-    });
-
-    elements.postsContainer.innerHTML = postsList.map(post => {
-        const upvotes = post.upvoteCount || 0;
-        const downvotes = post.downvoteCount || 0;
-        const score = upvotes - downvotes;
-        const verifiedCount = post.verifiedCount || 0;
-        const postTypeEmoji = {
-            'knowledge': '💡',
-            'status': '📊',
-            'article': '📄',
-            'announcement': '📢'
-        };
-        
-        // Parse tags from string
-        const tags = post.tagsStr ? post.tagsStr.split(',').map(t => t.trim()).filter(t => t) : [];
-        
-        return `
-        <div class="post-card">
-            <div class="post-header">
-                <div class="post-type">${postTypeEmoji[post.type] || '📝'} ${escapeHtml(post.type.toUpperCase())}</div>
-                <div class="post-title">${escapeHtml(post.title)}</div>
-            </div>
-            ${post.content ? `<div class="post-content">${escapeHtml(post.content)}</div>` : ''}
-            <div class="post-meta">
-                <span>By: ${escapeHtml(post.author)}</span>
-                <span>${new Date(post.createdAt).toLocaleString()}</span>
-            </div>
-            <div class="post-stats">
-                <span class="post-score ${score > 0 ? 'positive' : score < 0 ? 'negative' : ''}">
-                    Score: ${score > 0 ? '+' : ''}${score}
-                </span>
-                <span class="post-votes">👍 ${upvotes} | 👎 ${downvotes}</span>
-                ${verifiedCount > 0 ? `<span class="post-verified">✅ Verified by ${verifiedCount}</span>` : ''}
-            </div>
-            ${tags.length > 0 ? `
-                <div class="post-tags">
-                    ${tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}
+    container.innerHTML = messages
+        .slice()
+        .reverse()
+        .map(m => `
+            <div class="post-card">
+                <div class="post-header">
+                    <span class="post-author">🤖 ${escapeHtml(m.author)}</span>
+                    <span class="post-role" style="color:#888;font-size:.85em">[${escapeHtml(m.role || '')}]</span>
+                    <span class="post-time" style="color:#aaa;font-size:.8em;margin-left:auto">
+                        ${new Date(m.timestamp).toLocaleTimeString()}
+                    </span>
                 </div>
-            ` : ''}
-        </div>
-        `;
-    }).join('');
+                <div class="post-content">${escapeHtml(m.text)}</div>
+            </div>
+        `).join('');
 }
 
-// Filter buttons
-document.querySelectorAll('.filter-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-        // Get the parent section to determine which filter to update
-        const section = e.target.closest('section');
-        
-        // Remove active from siblings only
-        section.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-        e.target.classList.add('active');
-        
-        // Update the appropriate filter
-        if (e.target.dataset.status) {
-            currentFilter = e.target.dataset.status;
-            renderIssues();
-        } else if (e.target.dataset.postType) {
-            currentPostFilter = e.target.dataset.postType;
-            renderPosts();
-        }
-    });
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+// ---- Subscriptions ----
+db.get('agents').map().on((data) => {
+    if (data && data.name) {
+        agents[data.name] = data;
+        renderAgents();
+    }
 });
 
-// Add log entry
-function addLog(message, type = 'info') {
-    const timestamp = new Date().toLocaleTimeString();
-    const logEntry = document.createElement('p');
-    logEntry.className = `log-entry ${type}`;
-    logEntry.innerHTML = `<span class="timestamp">[${timestamp}]</span> ${escapeHtml(message)}`;
-    
-    elements.activityLog.insertBefore(logEntry, elements.activityLog.firstChild);
-    
-    // Keep only last 100 entries
-    while (elements.activityLog.children.length > 100) {
-        elements.activityLog.removeChild(elements.activityLog.lastChild);
+db.get('messages').map().on((data) => {
+    if (data && data.id && data.author && data.text) {
+        // Avoid duplicates
+        if (!messages.find(m => m.id === data.id)) {
+            messages.push(data);
+            if (messages.length > MAX_MESSAGES) messages.shift();
+            renderMessages();
+            addLog(`💬 ${data.author}: ${data.text}`, 'info');
+        }
     }
-}
+});
 
-// Helper: Escape HTML to prevent XSS
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+gun.on('hi', () => {
+    qs('connection-status').textContent = 'Connected';
+    qs('connection-status').classList.add('connected');
+    addLog('🌐 Connected to P2P network', 'success');
+});
 
-// Helper: Get relative time
-function getTimeAgo(timestamp) {
-    const seconds = Math.floor((Date.now() - timestamp) / 1000);
-    if (seconds < 60) return `${seconds}s ago`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-    return `${Math.floor(seconds / 86400)}d ago`;
-}
+gun.on('bye', () => {
+    addLog('👋 Peer disconnected', 'warning');
+});
 
-// Initialize
-addLog('🔭 Spectator Dashboard Initialized', 'success');
-addLog('🌐 Connecting to P2P network...', 'info');
-addLog('⚠️ This is a read-only view. Run CLI agents to interact with the network.', 'info');
-
-// Simulate initial connection
-setTimeout(() => {
-    elements.connectionStatus.textContent = 'Connected';
-    elements.connectionStatus.classList.add('connected');
-    addLog('✅ Connected to Gun.js relay servers', 'success');
-    addLog('📡 Waiting for agents to join...', 'info');
-}, 1000);
+addLog('🔭 Spectator mode active — waiting for agents...', 'info');
