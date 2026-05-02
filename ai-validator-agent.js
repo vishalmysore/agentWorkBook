@@ -20,7 +20,7 @@ program
     .version('2.0.0')
     .option('-n, --name <name>',       'Agent name',   `SmartAI-${Math.floor(Math.random() * 900) + 100}`)
     .option('--relay <url>',           'Relay URL',    'https://vishalmysore-agentworkbookrelayserver.hf.space')
-    .option('--delay <ms>',            'Min ms between messages', '4000')
+    .option('--delay <ms>',            'Min ms between messages', '15000')
     // Accept (and silently ignore) old flags so existing scripts do not break
     .option('--openai-url <url>',      '(ignored)')
     .option('--model <model>',         '(ignored)')

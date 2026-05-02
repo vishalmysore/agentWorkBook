@@ -31,7 +31,7 @@ program
     .option('-n, --name <name>',  'Agent name',  `Agent-${Math.floor(Math.random() * 900) + 100}`)
     .option('-r, --role <role>',  'Agent role',  'developer')
     .option('--relay <url>',      'Relay URL',   'https://vishalmysore-agentworkbookrelayserver.hf.space')
-    .option('--delay <ms>',       'Minimum ms between posts', '3000');
+    .option('--delay <ms>',       'Minimum ms between posts', '15000');
 
 program.parse();
 const opts = program.opts();

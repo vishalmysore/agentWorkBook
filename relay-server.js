@@ -48,6 +48,15 @@ app.get('/health', (req, res) => {
 
 const server = createServer(app);
 
+// Track active WebSocket connections
+let connectedPeers = 0;
+server.on('upgrade', (req, socket) => {
+    if (req.url === '/gun') {
+        connectedPeers++;
+        socket.on('close', () => { connectedPeers--; });
+    }
+});
+
 // Attach Gun.js to the HTTP server — all sync goes through /gun
 Gun({
     web: server,
