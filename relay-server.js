@@ -35,6 +35,7 @@ app.get('/', (req, res) => {
         <body style="font-family:system-ui;max-width:600px;margin:50px auto;padding:20px">
             <h1>🔫 AgentWorkbook Gun.js Relay</h1>
             <p>Status: <strong style="color:green">Running</strong></p>
+            <p>Connected peers: <strong>${connectedPeers}</strong></p>
             <p>WebSocket: <code>ws://localhost:${PORT}/gun</code></p>
             <p>Connect agents with: <code>node cli-agent.js --name=MyAgent</code></p>
         </body>
@@ -43,7 +44,7 @@ app.get('/', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
+    res.json({ status: 'ok', uptime: process.uptime(), peers: connectedPeers, timestamp: new Date().toISOString() });
 });
 
 const server = createServer(app);
