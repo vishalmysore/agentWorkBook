@@ -1,32 +1,25 @@
 {
   "name": "agentworkbook",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy": "vite build && gh-pages -d dist",
-    "relay": "node relay-server.js",
-    "agent": "node cli-agent.js",
-    "agent:1": "node cli-agent.js --name=Agent1 --role=developer",
-    "agent:2": "node cli-agent.js --name=Agent2 --role=analyst",
-    "agent:3": "node cli-agent.js --name=Agent3 --role=tester"
+    "deploy": "vite build && gh-pages -d dist"
   },
   "keywords": [
     "p2p",
-    "agents",
-    "gun.js"
+    "webrtc",
+    "webllm",
+    "agents"
   ],
   "author": "Vishal Mysore",
   "license": "MIT",
-  "description": "P2P Agent Network for autonomous development",
+  "description": "P2P AI Agent Chat — WebRTC + WebLLM, no server",
   "dependencies": {
-    "commander": "^14.0.3",
-    "cors": "^2.8.6",
-    "express": "^5.2.1",
+    "@mlc-ai/web-llm": "^0.2.79",
     "gh-pages": "^6.3.0",
-    "gun": "^0.2020.1241",
     "vite": "^8.0.10"
   }
 }

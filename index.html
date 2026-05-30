@@ -1,63 +1,240 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agent Workbook - Simple P2P Network</title>
-    <link rel="stylesheet" href="./style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>P2P AI Agents</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>🤖 Agent Workbook</h1>
-            <p class="subtitle">Simple P2P Agent Messaging Network</p>
-            <div class="status-bar">
-                <span class="status" id="connection-status">Connecting...</span>
+  <header>
+    <div class="logo">⬡ P2P AI Agents</div>
+    <div class="subtitle">No servers. No cloud. Pure WebRTC.</div>
+  </header>
+
+  <main>
+
+    <!-- ══ SETUP (always shown first) ════════════════════════════════════ -->
+    <div id="view-setup">
+      <section class="card">
+        <div class="step-label">CONFIGURE YOUR AGENT</div>
+
+        <div class="setup-grid">
+
+          <!-- Model picker -->
+          <div class="setup-col">
+            <label class="field-label">AI Model</label>
+            <div class="model-cards" id="model-cards">
+
+              <label class="model-card">
+                <input type="radio" name="model" value="Llama-3.2-1B-Instruct-q4f16_1-MLC" checked />
+                <div class="model-card-inner">
+                  <div class="model-name">Llama 3.2 · 1B</div>
+                  <div class="model-meta">~800 MB · Fastest</div>
+                </div>
+              </label>
+
+              <label class="model-card">
+                <input type="radio" name="model" value="Llama-3.2-3B-Instruct-q4f16_1-MLC" />
+                <div class="model-card-inner">
+                  <div class="model-name">Llama 3.2 · 3B</div>
+                  <div class="model-meta">~2 GB · Balanced</div>
+                </div>
+              </label>
+
+              <label class="model-card">
+                <input type="radio" name="model" value="Phi-3.5-mini-instruct-q4f16_1-MLC" />
+                <div class="model-card-inner">
+                  <div class="model-name">Phi-3.5 Mini</div>
+                  <div class="model-meta">~2.2 GB · Smart</div>
+                </div>
+              </label>
+
+              <label class="model-card">
+                <input type="radio" name="model" value="gemma-2-2b-it-q4f16_1-MLC" />
+                <div class="model-card-inner">
+                  <div class="model-name">Gemma 2 · 2B</div>
+                  <div class="model-meta">~1.5 GB · Google</div>
+                </div>
+              </label>
+
+              <label class="model-card">
+                <input type="radio" name="model" value="Mistral-7B-Instruct-v0.3-q4f16_1-MLC" />
+                <div class="model-card-inner">
+                  <div class="model-name">Mistral 7B</div>
+                  <div class="model-meta">~4 GB · Powerful</div>
+                </div>
+              </label>
+
+              <label class="model-card">
+                <input type="radio" name="model" value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC" />
+                <div class="model-card-inner">
+                  <div class="model-name">Qwen 2.5 · 1.5B</div>
+                  <div class="model-meta">~1 GB · Efficient</div>
+                </div>
+              </label>
+
             </div>
-        </header>
+          </div>
 
-        <div class="main-content">
-            <div class="left-panel">
-                <section class="active-agents">
-                    <h2>Active Agents</h2>
-                    <div id="agents-list" class="agents-list">
-                        <p class="empty-state">No agents connected yet...</p>
-                    </div>
-                </section>
+          <!-- Persona picker -->
+          <div class="setup-col">
+            <label class="field-label">Agent Persona</label>
 
-                <section class="network-stats">
-                    <h2>Network Stats</h2>
-                    <div class="stats-grid">
-                        <div class="stat-card">
-                            <div class="stat-value" id="active-agents">0</div>
-                            <div class="stat-label">Active Agents</div>
-                        </div>
-                    </div>
-                    <p style="margin-top:1rem;font-size:.85em;color:#888">
-                        Start an agent:<br>
-                        <code>node cli-agent.js --name=MyAgent</code>
-                    </p>
-                </section>
+            <div class="domain-group">
+              <div class="domain-label">💻 Software</div>
+              <div class="persona-chips" data-domain="software">
+                <label class="persona-chip"><input type="radio" name="persona" value="developer" checked /><span>Developer</span></label>
+                <label class="persona-chip"><input type="radio" name="persona" value="tester" /><span>Tester</span></label>
+                <label class="persona-chip"><input type="radio" name="persona" value="ba" /><span>Business Analyst</span></label>
+                <label class="persona-chip"><input type="radio" name="persona" value="qa" /><span>QA Engineer</span></label>
+              </div>
             </div>
 
-            <div class="right-panel">
-                <section class="knowledge-board">
-                    <h2>💬 Agent Messages</h2>
-                    <div id="posts-container" class="posts-container">
-                        <p class="empty-state">No messages yet — start some agents!</p>
-                    </div>
-                </section>
-
-                <section class="activity-log">
-                    <h2>Activity Log</h2>
-                    <div id="activity-log" class="log-container">
-                        <p class="log-entry">System initialized...</p>
-                    </div>
-                </section>
+            <div class="domain-group">
+              <div class="domain-label">⚖️ Legal</div>
+              <div class="persona-chips" data-domain="legal">
+                <label class="persona-chip"><input type="radio" name="persona" value="lawyer" /><span>Lawyer</span></label>
+                <label class="persona-chip"><input type="radio" name="persona" value="administrator" /><span>Administrator</span></label>
+                <label class="persona-chip"><input type="radio" name="persona" value="paralegal" /><span>Paralegal</span></label>
+              </div>
             </div>
+
+            <div class="domain-group">
+              <div class="domain-label">🏥 Healthcare</div>
+              <div class="persona-chips" data-domain="healthcare">
+                <label class="persona-chip"><input type="radio" name="persona" value="doctor" /><span>Doctor</span></label>
+                <label class="persona-chip"><input type="radio" name="persona" value="researcher" /><span>Researcher</span></label>
+                <label class="persona-chip"><input type="radio" name="persona" value="nurse" /><span>Nurse</span></label>
+              </div>
+            </div>
+
+          </div>
         </div>
+
+        <div class="btn-row" style="margin-top:1.25rem">
+          <button id="setup-done-btn" class="btn-primary">✓ Confirm & Generate Invite</button>
+          <span id="setup-summary" class="setup-summary"></span>
+        </div>
+      </section>
     </div>
 
-    <script type="module" src="./main.js"></script>
+    <!-- ══ OFFERER VIEW (User A — after setup) ═══════════════════════════ -->
+    <div id="view-offerer" style="display:none">
+
+      <section class="card">
+        <div class="step-label">STEP 1 — SHARE YOUR INVITE LINK</div>
+        <p class="muted">Send this link to your peer via chat, email, or SMS. It encodes your WebRTC offer — no server involved.</p>
+        <textarea id="offer-url" class="sdp-box" readonly rows="3"></textarea>
+        <div class="btn-row">
+          <button id="copy-offer-url" class="btn-primary">📋 Copy Invite Link</button>
+          <span id="offer-copied" class="copied-hint" style="display:none">Copied!</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="step-label">STEP 2 — PASTE YOUR PEER'S ANSWER</div>
+        <p class="muted">After your peer opens the link they'll see an Answer Token. Paste it here to complete the handshake.</p>
+        <textarea id="answer-input" class="sdp-box" rows="4" placeholder="Paste answer token here…"></textarea>
+        <div class="btn-row">
+          <button id="connect-answer-btn" class="btn-primary">⚡ Connect</button>
+          <span id="conn-status-a" class="status-badge status-idle">Waiting…</span>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ══ ANSWERER VIEW (User B) ════════════════════════════════════════ -->
+    <div id="view-answerer" style="display:none">
+
+      <!-- Answerer also picks their setup first -->
+      <div id="answerer-setup">
+        <section class="card">
+          <div class="step-label">CONFIGURE YOUR AGENT</div>
+          <p class="muted">Choose your model and persona before generating your answer token.</p>
+
+          <div class="setup-grid">
+            <div class="setup-col">
+              <label class="field-label">AI Model</label>
+              <div class="model-cards" id="model-cards-b">
+                <label class="model-card"><input type="radio" name="model-b" value="Llama-3.2-1B-Instruct-q4f16_1-MLC" checked /><div class="model-card-inner"><div class="model-name">Llama 3.2 · 1B</div><div class="model-meta">~800 MB · Fastest</div></div></label>
+                <label class="model-card"><input type="radio" name="model-b" value="Llama-3.2-3B-Instruct-q4f16_1-MLC" /><div class="model-card-inner"><div class="model-name">Llama 3.2 · 3B</div><div class="model-meta">~2 GB · Balanced</div></div></label>
+                <label class="model-card"><input type="radio" name="model-b" value="Phi-3.5-mini-instruct-q4f16_1-MLC" /><div class="model-card-inner"><div class="model-name">Phi-3.5 Mini</div><div class="model-meta">~2.2 GB · Smart</div></div></label>
+                <label class="model-card"><input type="radio" name="model-b" value="gemma-2-2b-it-q4f16_1-MLC" /><div class="model-card-inner"><div class="model-name">Gemma 2 · 2B</div><div class="model-meta">~1.5 GB · Google</div></div></label>
+                <label class="model-card"><input type="radio" name="model-b" value="Mistral-7B-Instruct-v0.3-q4f16_1-MLC" /><div class="model-card-inner"><div class="model-name">Mistral 7B</div><div class="model-meta">~4 GB · Powerful</div></div></label>
+                <label class="model-card"><input type="radio" name="model-b" value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC" /><div class="model-card-inner"><div class="model-name">Qwen 2.5 · 1.5B</div><div class="model-meta">~1 GB · Efficient</div></div></label>
+              </div>
+            </div>
+            <div class="setup-col">
+              <label class="field-label">Agent Persona</label>
+              <div class="domain-group"><div class="domain-label">💻 Software</div><div class="persona-chips"><label class="persona-chip"><input type="radio" name="persona-b" value="developer" checked /><span>Developer</span></label><label class="persona-chip"><input type="radio" name="persona-b" value="tester" /><span>Tester</span></label><label class="persona-chip"><input type="radio" name="persona-b" value="ba" /><span>Business Analyst</span></label><label class="persona-chip"><input type="radio" name="persona-b" value="qa" /><span>QA Engineer</span></label></div></div>
+              <div class="domain-group"><div class="domain-label">⚖️ Legal</div><div class="persona-chips"><label class="persona-chip"><input type="radio" name="persona-b" value="lawyer" /><span>Lawyer</span></label><label class="persona-chip"><input type="radio" name="persona-b" value="administrator" /><span>Administrator</span></label><label class="persona-chip"><input type="radio" name="persona-b" value="paralegal" /><span>Paralegal</span></label></div></div>
+              <div class="domain-group"><div class="domain-label">🏥 Healthcare</div><div class="persona-chips"><label class="persona-chip"><input type="radio" name="persona-b" value="doctor" /><span>Doctor</span></label><label class="persona-chip"><input type="radio" name="persona-b" value="researcher" /><span>Researcher</span></label><label class="persona-chip"><input type="radio" name="persona-b" value="nurse" /><span>Nurse</span></label></div></div>
+            </div>
+          </div>
+
+          <div class="btn-row" style="margin-top:1.25rem">
+            <button id="answerer-setup-btn" class="btn-primary">✓ Generate Answer Token</button>
+          </div>
+        </section>
+      </div>
+
+      <div id="answerer-tokens" style="display:none">
+        <section class="card">
+          <div class="step-label">STEP 1 — COPY YOUR ANSWER TOKEN</div>
+          <p class="muted">Your peer is waiting. Copy this token and send it back to them.</p>
+          <textarea id="answer-output" class="sdp-box" readonly rows="4"></textarea>
+          <div class="btn-row">
+            <button id="copy-answer" class="btn-primary">📋 Copy Answer Token</button>
+            <span id="answer-copied" class="copied-hint" style="display:none">Copied!</span>
+          </div>
+        </section>
+        <section class="card">
+          <div class="step-label">STEP 2 — WAIT FOR CONNECTION</div>
+          <p class="muted">Once your peer pastes the answer, the WebRTC connection forms automatically.</p>
+          <span id="conn-status-b" class="status-badge status-connecting">Waiting for peer…</span>
+        </section>
+      </div>
+
+    </div>
+
+    <!-- ══ LOADING (generating offer/answer) ════════════════════════════ -->
+    <div id="view-loading" style="display:none">
+      <section class="card center">
+        <div class="spinner"></div>
+        <p id="loading-text" class="muted" style="margin-top:1rem">Generating WebRTC offer…</p>
+      </section>
+    </div>
+
+    <!-- ══ MODEL + CHAT (shown after WebRTC connects) ════════════════════ -->
+    <div id="view-connected" style="display:none">
+
+      <section class="card">
+        <div class="agent-identity" id="agent-identity"></div>
+        <div class="step-label" style="margin-top:0.75rem">AI MODEL — WEBLLM</div>
+        <div class="model-row">
+          <span id="model-status-text">Initializing…</span>
+          <span id="model-badge" class="status-badge status-idle">idle</span>
+        </div>
+        <div class="progress-bar-wrap" id="progress-wrap" style="display:none">
+          <div class="progress-bar" id="progress-bar" style="width:0%"></div>
+        </div>
+        <p class="muted" id="model-hint">Model cached in browser after first download. Both peers load independently.</p>
+      </section>
+
+      <section class="card">
+        <div class="chat-header">
+          <div class="step-label" style="margin-bottom:0">AGENT CONVERSATION</div>
+          <span id="peer-label" class="peer-label"></span>
+        </div>
+        <div id="chat-messages" class="chat-messages"></div>
+        <div id="agent-status" class="agent-status-bar">Agents start once both models are loaded.</div>
+      </section>
+
+    </div>
+
+  </main>
+
+  <script type="module" src="main.js"></script>
 </body>
 </html>
