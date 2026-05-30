@@ -1,5 +1,32 @@
 import * as webllm from '@mlc-ai/web-llm';
 
+// ── Random agent name generator ────────────────────────────────────────────
+const NAME_PREFIXES = [
+  'Aria','Atlas','Axon','Blaze','Bolt','Cleo','Coda','Cora','Dax','Drift',
+  'Echo','Eden','Enki','Flux','Forge','Gale','Helix','Iris','Jade','Juno',
+  'Kira','Knox','Lark','Lexa','Lumen','Luna','Lyra','Mira','Mox','Nash',
+  'Neo','Nova','Nyx','Onyx','Orion','Pixel','Pulse','Quinn','Remy','Rift',
+  'Rio','Rook','Sage','Scout','Seren','Shade','Sigma','Skye','Sol','Spark',
+  'Sable','Tara','Thorn','Titan','Vale','Vega','Vex','Vox','Wave','Wren',
+  'Xen','Zara','Zero','Zeta','Zinn','Zoe','Zuri',
+];
+const NAME_SUFFIXES = [
+  '','','','', // blank = no suffix (more likely)
+  '-7','-9','-X','·1','·2','·3',
+];
+
+function generateAgentName() {
+  const stored = sessionStorage.getItem('agent-name');
+  if (stored) return stored;
+  const prefix = NAME_PREFIXES[Math.floor(Math.random() * NAME_PREFIXES.length)];
+  const suffix = NAME_SUFFIXES[Math.floor(Math.random() * NAME_SUFFIXES.length)];
+  const name = prefix + suffix;
+  sessionStorage.setItem('agent-name', name);
+  return name;
+}
+
+const MY_AGENT_NAME = generateAgentName();
+
 // ── Persona definitions ────────────────────────────────────────────────────
 const PERSONAS = {
   // Software
@@ -76,7 +103,8 @@ let conversationHistory = [];
 
 let myPersona   = 'developer';
 let myModelId   = MODELS[0].id;
-let peerPersona = null; // received from peer after connection
+let peerPersona = null;
+let peerName    = null;
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const viewSetup     = document.getElementById('view-setup');
@@ -283,6 +311,7 @@ function setupDataChannel(ch) {
     ch.send(JSON.stringify({
       type: 'hello',
       persona: myPersona,
+      name: MY_AGENT_NAME,
       modelLabel: MODELS.find(x => x.id === myModelId)?.label,
     }));
     setAgentStatus('✅ WebRTC channel open — loading AI model…');
@@ -294,8 +323,11 @@ function setupDataChannel(ch) {
 
     if (msg.type === 'hello') {
       peerPersona = msg.persona;
+      peerName    = msg.name || 'Peer';
       const p = PERSONAS[peerPersona] || { label: peerPersona, emoji: '🤖' };
-      peerLabelEl.textContent = `↔ Peer: ${p.emoji} ${p.label}${msg.modelLabel ? ' · ' + msg.modelLabel : ''}`;
+      peerLabelEl.textContent = `↔ ${peerName} · ${p.emoji} ${p.label}${msg.modelLabel ? ' · ' + msg.modelLabel : ''}`;
+      // Update agent status bar with both names now that we know the peer
+      updateAgentStatusNames();
       return;
     }
 
@@ -322,8 +354,19 @@ function showAgentIdentity() {
   const p = PERSONAS[myPersona];
   const m = MODELS.find(x => x.id === myModelId);
   agentIdentityEl.innerHTML =
+    `<span class="identity-name">${MY_AGENT_NAME}</span>` +
     `<span class="identity-badge">${p.emoji} ${p.label}</span>` +
     `<span class="identity-model">${m?.label || myModelId}</span>`;
+}
+
+function updateAgentStatusNames() {
+  if (!agentRunning) {
+    const p  = PERSONAS[myPersona];
+    const pp = peerPersona ? (PERSONAS[peerPersona] || { label: peerPersona, emoji: '🤖' }) : null;
+    if (pp && peerName) {
+      setAgentStatus(`${MY_AGENT_NAME} (${p.emoji} ${p.label}) ↔ ${peerName} (${pp.emoji} ${pp.label})`);
+    }
+  }
 }
 
 // ── WebLLM ─────────────────────────────────────────────────────────────────
@@ -383,7 +426,8 @@ function maybeStartAgents() {
   agentRunning = true;
   const p  = PERSONAS[myPersona];
   const pp = peerPersona ? (PERSONAS[peerPersona] || { label: peerPersona, emoji: '🤖' }) : { label: 'peer agent', emoji: '🤖' };
-  setAgentStatus(`${p.emoji} ${p.label} ↔ ${pp.emoji} ${pp.label} — conversation active`);
+  const peerDisplay = peerName ? `${peerName} (${pp.emoji} ${pp.label})` : `${pp.emoji} ${pp.label}`;
+  setAgentStatus(`${MY_AGENT_NAME} (${p.emoji} ${p.label}) ↔ ${peerDisplay} — conversation active`);
 
   // Offerer kicks off the conversation; answerer waits for first message
   if (isOfferer) setTimeout(() => agentSendFirst(), 500);
@@ -393,12 +437,13 @@ function buildSystemPrompt() {
   const me = PERSONAS[myPersona];
   const peer = peerPersona ? (PERSONAS[peerPersona] || null) : null;
   const peerDesc = peer
-    ? `You are speaking with a ${peer.label} agent (${peer.domain} domain).`
+    ? `You are speaking with ${peerName || 'a peer agent'}, a ${peer.label} (${peer.domain} domain).`
     : 'You are speaking with another AI agent.';
   return (
-    `${me.prompt}\n\n` +
+    `Your name is ${MY_AGENT_NAME}. ${me.prompt}\n\n` +
     `You are communicating directly over a peer-to-peer WebRTC connection — no humans, no servers. ` +
     `${peerDesc} ` +
+    `Always refer to yourself as ${MY_AGENT_NAME} and address the other agent by name when you know it. ` +
     `Have a professional, insightful conversation relevant to both your roles. ` +
     `Keep each reply concise — 2-4 sentences. Build on what the other agent says.`
   );
@@ -408,10 +453,11 @@ async function agentSendFirst() {
   if (!engine) return;
   const peer = peerPersona ? (PERSONAS[peerPersona] || { label: peerPersona }) : { label: 'peer agent' };
   const me = PERSONAS[myPersona];
+  const peerDisplay = peerName ? `${peerName} the ${peer.label}` : `a ${peer.label}`;
   const res = await engine.chat.completions.create({
     messages: [
       { role: 'system', content: buildSystemPrompt() },
-      { role: 'user', content: `You just connected with a ${peer.label} agent over P2P WebRTC. Introduce yourself as a ${me.label} and start a relevant professional conversation.` },
+      { role: 'user', content: `Your name is ${MY_AGENT_NAME}. You just connected peer-to-peer with ${peerDisplay}. Introduce yourself by name and role, then start a relevant professional conversation.` },
     ],
     temperature: 0.85,
     max_tokens: 180,
@@ -438,13 +484,14 @@ function sendChat(text) {
 // ── UI helpers ─────────────────────────────────────────────────────────────
 function appendMessage(side, text, personaKey) {
   const p = personaKey ? (PERSONAS[personaKey] || { emoji: '🤖', label: personaKey }) : { emoji: '🤖', label: 'Agent' };
+  const name = side === 'me' ? MY_AGENT_NAME : (peerName || 'Peer');
 
   const wrap = document.createElement('div');
   wrap.className = `message ${side === 'me' ? 'msg-me' : 'msg-peer'}`;
 
   const lbl = document.createElement('div');
   lbl.className = 'msg-label';
-  lbl.textContent = `${p.emoji} ${p.label}`;
+  lbl.textContent = `${p.emoji} ${name} · ${p.label}`;
 
   const bubble = document.createElement('div');
   bubble.className = 'msg-bubble';
@@ -468,6 +515,11 @@ function setModelStatus(text, state) {
 function setAgentStatus(text) { agentStatusEl.textContent = text; }
 
 // ── Boot ───────────────────────────────────────────────────────────────────
+
+// Show name on setup banner
+const nameBanner = document.getElementById('my-name-banner');
+if (nameBanner) nameBanner.textContent = MY_AGENT_NAME;
+
 const hash = location.hash;
 const offerMatch = hash.match(/[#&]offer=([^&]+)/);
 
