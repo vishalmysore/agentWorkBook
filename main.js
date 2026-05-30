@@ -70,7 +70,6 @@ let pc = null;
 let dataChannel = null;
 let engine = null;
 let myModelReady = false;
-let peerModelReady = false;
 let agentRunning = false;
 let isOfferer = false;
 let conversationHistory = [];
@@ -180,10 +179,8 @@ function createPC() {
       setStatus(statusEl, 'WebRTC connected! 🎉', 'connected');
       hide(viewLoading);
       show(viewConnected);
-      // Exchange personas
-      sendControlMsg({ type: 'hello', persona: myPersona, modelLabel: MODELS.find(x => x.id === myModelId)?.label });
       showAgentIdentity();
-      loadModel();
+      // Don't call loadModel() here — wait for data channel to open first
     } else if (s === 'failed') {
       setStatus(statusEl, 'Connection failed — check both tokens.', 'error');
     } else if (s === 'connecting') {
@@ -282,11 +279,14 @@ async function generateAnswer() {
 // ── Data channel ───────────────────────────────────────────────────────────
 function setupDataChannel(ch) {
   ch.onopen = () => {
-    // send hello after open so peer knows our persona
-    if (ch.readyState === 'open') {
-      sendControlMsg({ type: 'hello', persona: myPersona, modelLabel: MODELS.find(x => x.id === myModelId)?.label });
-    }
-    maybeStartAgents();
+    // Channel is guaranteed open here — safe to send hello and start model load
+    ch.send(JSON.stringify({
+      type: 'hello',
+      persona: myPersona,
+      modelLabel: MODELS.find(x => x.id === myModelId)?.label,
+    }));
+    setAgentStatus('✅ WebRTC channel open — loading AI model…');
+    loadModel(); // start model load now that channel is ready
   };
 
   ch.onmessage = async (e) => {
@@ -298,20 +298,20 @@ function setupDataChannel(ch) {
       peerLabelEl.textContent = `↔ Peer: ${p.emoji} ${p.label}${msg.modelLabel ? ' · ' + msg.modelLabel : ''}`;
       return;
     }
-    if (msg.type === 'model-ready') {
-      peerModelReady = true;
-      maybeStartAgents();
-      return;
-    }
+
     if (msg.type === 'chat') {
       appendMessage('peer', msg.content, msg.persona);
       conversationHistory.push({ role: 'user', content: msg.content });
-      setTimeout(() => agentReply(), 600 + Math.random() * 800);
+      if (myModelReady) {
+        // Model already loaded — reply straight away
+        setTimeout(() => agentReply(), 600 + Math.random() * 800);
+      }
+      // If model still loading, agentReply() will fire once it's ready (see loadModel)
     }
   };
 }
 
-function sendControlMsg(obj) {
+function sendMsg(obj) {
   if (dataChannel?.readyState === 'open') {
     dataChannel.send(JSON.stringify(obj));
   }
@@ -362,24 +362,30 @@ async function loadModel() {
   hide(progressWrap);
   setModelStatus('Model ready ✓', 'ready');
   myModelReady = true;
-  sendControlMsg({ type: 'model-ready' });
-  maybeStartAgents();
+
+  // If peer already sent us a message while our model was loading, reply now
+  const lastMsg = conversationHistory[conversationHistory.length - 1];
+  if (lastMsg?.role === 'user') {
+    setAgentStatus('🤖 Model loaded — replying to peer…');
+    setTimeout(() => agentReply(), 500);
+  } else {
+    maybeStartAgents();
+  }
 }
 
 // ── Agent conversation ─────────────────────────────────────────────────────
 function maybeStartAgents() {
+  // Only need MY model ready — peer independently manages their side
   if (agentRunning) return;
-  if (!myModelReady || !peerModelReady) {
-    if (myModelReady && !peerModelReady) setAgentStatus("Waiting for peer's model…");
-    return;
-  }
+  if (!myModelReady) return;
   if (dataChannel?.readyState !== 'open') return;
 
   agentRunning = true;
-  const p = PERSONAS[myPersona];
+  const p  = PERSONAS[myPersona];
   const pp = peerPersona ? (PERSONAS[peerPersona] || { label: peerPersona, emoji: '🤖' }) : { label: 'peer agent', emoji: '🤖' };
-  setAgentStatus(`${p.emoji} ${p.label} ↔ ${pp.emoji} ${pp.label} — conversation started!`);
+  setAgentStatus(`${p.emoji} ${p.label} ↔ ${pp.emoji} ${pp.label} — conversation active`);
 
+  // Offerer kicks off the conversation; answerer waits for first message
   if (isOfferer) setTimeout(() => agentSendFirst(), 500);
 }
 
@@ -426,7 +432,7 @@ async function agentReply() {
 function sendChat(text) {
   conversationHistory.push({ role: 'assistant', content: text });
   appendMessage('me', text, myPersona);
-  dataChannel.send(JSON.stringify({ type: 'chat', content: text, persona: myPersona }));
+  sendMsg({ type: 'chat', content: text, persona: myPersona });
 }
 
 // ── UI helpers ─────────────────────────────────────────────────────────────
