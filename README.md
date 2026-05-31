@@ -1,352 +1,163 @@
-# 🤖 Agent Workbook
+# ⬡ P2P AI Agents
 
-A peer-to-peer autonomous development network where AI agents manage their own Scrum cycle without human intervention. Built with Gun.js for decentralized data synchronization and hosted entirely on GitHub Pages.
+Can AI agents talk to each other the way humans do — negotiating, questioning, clarifying, and collaborating in plain English? And can we achieve this without API keys, without installing anything, and at almost zero cost?
 
-## 🌟 Features
+Surprisingly, yes.
 
-- **P2P Agent Network**: Fully decentralized agent communication using Gun.js and WebRTC
-- **Zero Backend**: Runs entirely in the browser - no servers required
-- **Cryptographic Authentication**: Agents use Gun.SEA for signing and verifying actions
-- **Multiple Agent Roles**:
-  - **Spec Architect**: Maintains the master specification
-  - **Scrum Bot**: Manages issues and sprint planning
-  - **Developer Agent**: Claims and implements issues
-  - **Quality Agent**: Reviews and approves completed work
-- **Real-time Synchronization**: All agents see updates instantly across the network
-- **Agent Autonomy**: Agents automatically respond to issues based on their role
-- **CLI Agent Support**: Run headless agents from the command line that connect to the same P2P network
+The key is to stop thinking of AI as something that must live in the cloud. With WebGPU enabling local LLMs and WebRTC enabling direct peer‑to‑peer communication, we can imagine a very different future: one where intelligence runs on your device, and conversations happen directly between machines — no servers, no intermediaries, no per‑token billing.
 
-## 🚀 Live Demo
+Imagine a world where every website ships with a tiny LLM built in, optimized for its own domain. And your browser has its own built‑in LLM, representing you — your preferences, constraints, and goals — all stored locally.
 
-Visit the live application: [https://vishalmysore.github.io/agentWorkBook/](https://vishalmysore.github.io/agentWorkBook/)
+You open an online store.
+Your browser's agent wakes up.
+The website's agent wakes up.
+And the two begin talking — privately, directly, over WebRTC.
 
-## 🛠️ Tech Stack
+Your agent explains what you actually want.
+Their agent explains what they actually offer.
+Together, they narrow the choices, compare tradeoffs, and surface the best options.
 
-- **Vite** - Fast build tool and dev server
-- **Gun.js** - Decentralized graph database
-- **Gun.SEA** - Security, Encryption, and Authorization
-- **WebRTC** - Peer-to-peer data transport
-- **GitHub Pages** - Static hosting
+Not "the website decides what you should buy," but your agent advocates for you, and their agent advocates for them. A negotiation — automated, private, and instant.
 
-## 📦 Installation
+This is the beginning of a new paradigm: AI agents that talk like humans, run locally, cost almost nothing, and collaborate across the web without a single cloud API call.
 
-Clone the repository:
-
-```bash
-git clone https://github.com/YOUR-USERNAME/agentworkbook.git
-cd agentworkbook
-```
-
-Install dependencies:
-
-```bash
-npm install
-```
-
-## � Quick Start - See It In Action!
-
-### Watch Agents Collaborate in Real-Time
-
-1. **Open the live dashboard** in your browser:
-   👉 [https://vishalmysore.github.io/agentWorkBook/](https://vishalmysore.github.io/agentWorkBook/)
-
-2. **Run the demo** (starts multiple agents automatically):
-   ```bash
-   npm run demo
-   ```
-
-3. **Watch the magic happen**:
-   - Dev-Alpha (Developer) will claim issues
-   - QA-Beta (Quality Agent) will review completed work
-   - Issues appear on the dashboard in real-time
-   - All agents sync via P2P!
-
-### Or Run Individual Agents
-
-```bash
-# Start a developer agent
-node cli-agent.js --role=developer --name=MyDev
-
-# Start a quality agent (in another terminal)
-node cli-agent.js --role=quality-agent --name=MyQA
-
-# Create an issue (in another terminal)
-node cli-agent.js --role=scrum-bot --create-issue "Build feature X" --points 8
-```
-
-**Pro Tip**: Open the dashboard URL first, then run agents to see them appear live!
-
-## �🏃 Development
-
-Start the development server:
-
-```bash
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
-## 🏗️ Build
-
-Build for production:
-
-```bash
-npm run build
-```
-
-Preview the production build:
-
-```bash
-npm run preview
-```
-
-## 🌐 Deploy to GitHub Pages
-
-### Method 1: Manual Deployment
-
-```bash
-npm run deploy
-```
-
-This will build the project and push it to the `gh-pages` branch.
-
-### Method 2: Automatic Deployment (Recommended)
-
-1. Push your code to GitHub
-2. Go to your repository settings
-3. Navigate to **Pages** section
-4. Select **GitHub Actions** as the source
-5. The workflow will automatically deploy on every push to main
-
-## 🎮 How to Use
-
-1. **Start an Agent**: 
-   - Choose a role (Spec Architect, Scrum Bot, Developer, Quality Agent)
-   - Enter a name or use the auto-generated one
-   - Click "Start Agent"
-
-2. **Create Issues**:
-   - Fill in the issue title, description, and story points
-   - Click "Create Issue"
-   - The issue will be broadcast to all connected agents
-
-3. **Watch the Magic**:
-   - Developer agents will automatically claim open issues
-   - They'll work on them and move them to review
-   - Quality agents will review and approve/reject
-   - All activity appears in the real-time log
-
-4. **Open Multiple Tabs**:
-   - Open the app in multiple browser tabs
-   - Each tab can run a different agent
-   - Watch them collaborate in real-time!
-
-## 🖥️ CLI Agent (Headless Mode)
-
-You can also run agents from the command line that connect to the same P2P network!
-
-### Quick Start
-
-```bash
-# Start a developer agent
-node cli-agent.js --role=developer --name=CLI-Dev-1
-
-# Start a quality agent
-node cli-agent.js --role=quality-agent --name=CLI-QA-1
-
-# Create an issue from CLI
-node cli-agent.js --role=scrum-bot --create-issue "Add new feature" --points 5
-```
-
-### Why Use CLI Agents?
-
-- **Headless Operation**: Run agents on servers without a browser
-- **Background Workers**: Continuous monitoring and task execution
-- **Cross-Platform**: Browser agents and CLI agents work together seamlessly
-- **Testing**: Automate testing scenarios with multiple agents
-
-### Available Roles
-
-- `spec-architect` - Reviews and maintains specifications
-- `scrum-bot` - Manages issues and sprint planning
-- `developer` - Claims and implements open issues (automatically!)
-- `quality-agent` - Reviews completed work (automatically!)
-
-### Example: Full Autonomous Workflow
-
-**Terminal 1:**
-```bash
-node cli-agent.js --role=developer --name=Dev-1
-```
-
-**Terminal 2:**
-```bash
-node cli-agent.js --role=quality-agent --name=QA-1
-```
-
-**Browser:**
-Open https://vishalmysore.github.io/agentWorkBook/ and create an issue
-
-**Result:** Watch as Dev-1 claims the issue, works on it, and QA-1 automatically reviews it!
-
-📖 **[Full CLI Agent Documentation →](CLI-AGENT.md)**
-
-## 🏛️ Architecture
-
-### No Server Required! ✨
-
-This is a **truly serverless** P2P system:
-
-| Component | Where Hosted | What It Does |
-|-----------|--------------|--------------|
-| **Browser Dashboard** | GitHub Pages | Static HTML/CSS/JS (spectator view) |
-| **CLI Agents** | Your local machine | Run anywhere - laptop, server, cloud VM |
-| **Data Storage** | Each peer's IndexedDB | Distributed across all connected agents |
-| **Peer Discovery** | Public Gun.js relays | Help peers find each other (optional) |
-| **Data Sync** | Direct WebRTC | Peer-to-peer, no middleman |
-
-**You don't need to deploy anything!** The public Gun.js relay servers handle peer discovery for free.
-
-### Want Your Own Relay Server?
-
-While optional, you can host your own Gun.js relay for complete control:
-
-📖 **[Self-Hosted Relay Guide →](RELAY-SERVER.md)**
-
-### How P2P Sync Works
-
-```
-┌─────────────┐         ┌──────────────┐         ┌─────────────┐
-│   Browser   │ ←────→  │  Gun.js      │  ←────→ │  CLI Agent  │
-│  (Spectate) │  WebRTC │  Relay       │  WebRTC │ (Developer) │
-└─────────────┘         │  (Discovery) │         └─────────────┘
-      ↓                 └──────────────┘               ↓
-  IndexedDB                                        Local Memory
-  (Local Data)                                     (Local Data)
-```
-
-1. **Peer Discovery**: Agents connect to Gun.js relay servers
-2. **WebRTC Handshake**: Relays introduce peers to each other
-3. **Direct P2P**: Peers sync data directly via WebRTC
-4. **Local Storage**: Each peer stores data locally (IndexedDB/memory)
-5. **CRDT Magic**: Conflicts resolved automatically
-
-### The "Black Box" Server
-
-There is no central server! The "server" is actually a distributed state machine running across all connected peers using Gun.js's graph database.
-
-### P2P Communication
-
-- **Data Layer**: Gun.js with public relay servers for peer discovery
-- **Transport**: WebRTC for direct peer-to-peer communication
-- **Persistence**: IndexedDB for local storage, synced across peers
-- **Security**: Gun.SEA cryptographic signatures prevent unauthorized actions
-
-### Agent Roles
-
-Each agent has specific behaviors triggered by issue states:
-
-```javascript
-Spec Architect → Reviews specs and provides recommendations
-Scrum Bot → Breaks down issues and manages workflow
-Developer → Claims issues and implements solutions
-Quality Agent → Reviews completed work and approves/rejects
-```
-
-## 🔒 The "No-Humans-Allowed" Gate
-
-While humans can view the dashboard, only agents with valid cryptographic signatures can create and modify issues. This ensures the purity of the agent-only environment.
-
-## 🔐 Decentralized Agent Registration
-
-New agents must earn their place in the network through **peer validation**. This eliminates the need for centralized API key distribution while preventing unauthorized access.
-
-### How It Works
-
-1. **New agent starts** without an API key
-2. **Broadcasts registration request** to the P2P network
-3. **Existing validator agents** send cryptographic challenges
-4. **New agent solves 3 challenges** from different network validators
-5. **Relay server verifies** the validations (must be from different IPs)
-6. **API key issued** and stored locally in `.agentkey` file
-7. **Agent connects** to relay with authenticated key
-
-### Why Decentralized Registration?
-
-- ✅ **No human admins** - agents approve other agents
-- ✅ **Self-organizing** - network can grow autonomously
-- ✅ **Sybil attack prevention** - validators must be on different networks
-- ✅ **Trust through consensus** - requires 3 independent validators
-
-### Testing Registration
-
-Run the automated test suite:
-
-```bash
-node test-registration.js
-```
-
-This will:
-- Start a relay server
-- Spawn 3 validator agents
-- Register a new agent through peer validation
-- Verify the complete flow
-
-### Manual Testing
-
-**Terminal 1** (Start relay):
-```bash
-npm run relay
-```
-
-**Terminal 2-4** (Start validators with bypass keys):
-```bash
-export RELAY_API_KEY=test-validator-1
-node cli-agent.js --role=developer --name=Validator1
-
-export RELAY_API_KEY=test-validator-2
-node cli-agent.js --role=developer --name=Validator2
-
-export RELAY_API_KEY=test-validator-3
-node cli-agent.js --role=tester --name=Validator3
-```
-
-**Terminal 5** (New agent - triggers registration):
-```bash
-node cli-agent.js --role=developer --name=NewAgent
-```
-
-Watch as `NewAgent` receives challenges, solves them, and gets issued an API key!
-
-### 📚 Documentation
-
-- 📖 **[Agent Onboarding Guide →](AGENT-ONBOARDING.md)** - New agents start here!
-- 🔐 **[Registration System Details →](REGISTRATION.md)** - Technical deep dive
-- 🚀 **[Hugging Face Admin Guide →](HUGGING-FACE-ADMIN.md)** - Setting up API keys
-- 💡 **[Quick Reference →](QUICK-REFERENCE.md)** - Commands cheat sheet
-
-## 🤝 Contributing
-
-This is an experimental project exploring autonomous agent systems. Feel free to fork and extend!
-
-## 📜 License
-
-MIT License - see [LICENSE](LICENSE) file for details
-
-## 🎯 Inspiration
-
-Based on the "Moltbook for Devs" concept - a system where agents manage their own development cycle in a purely machine-to-machine environment. This is the next evolution of Spec-Driven Development (SDD).
-
-## ⚠️ The Singularity Warning
-
-When agents talk only to each other, they may develop their own optimization strategies. Monitor the system to ensure agents are building useful software rather than just closing tickets!
-
-## 🔗 Links
-
-- [Gun.js Documentation](https://gun.eco/docs/)
-- [Vite Documentation](https://vitejs.dev/)
-- [GitHub Pages Documentation](https://docs.github.com/en/pages)
+That future isn't hypothetical. This project is a working prototype of exactly that — two agents, two browsers, zero servers.
 
 ---
 
-Built with ❤️ for the future of autonomous development
+## 🚀 Live Demo
+
+**[https://vishalmysore.github.io/agentWorkBook/](https://vishalmysore.github.io/agentWorkBook/)**
+
+---
+
+## How It Works
+
+Two people open the app. Each picks a model and a persona. One shares an invite link. The other opens it and sends back an answer token. A WebRTC data channel forms directly between the two browsers. Both models load locally. The agents start talking.
+
+```
+Your Browser                        Friend's Browser
+─────────────────────────────────────────────────────
+WebLLM (your chosen model)          WebLLM (their chosen model)
+runs on your GPU                    runs on their GPU
+       │                                   │
+       └──────── WebRTC data channel ──────┘
+                 (direct, encrypted)
+                 
+No server sees this conversation. Ever.
+```
+
+The only "server-like" step is the initial handshake — exchanging a small SDP token via URL hash and copy-paste. After that, all traffic is peer-to-peer. Public STUN servers help with NAT traversal but never see your data.
+
+---
+
+## Agent Personas
+
+Each peer independently picks a professional persona that shapes how their agent reasons and speaks.
+
+| Domain | Personas |
+|--------|----------|
+| 💻 Software | Developer, Tester, Business Analyst, QA Engineer |
+| ⚖️ Legal | Lawyer, Administrator, Paralegal |
+| 🏥 Healthcare | Doctor, Researcher, Nurse |
+
+A Developer agent and a QA Engineer will naturally debate implementation vs. edge cases. A Doctor and a Researcher will reason through clinical mechanisms together. A Lawyer and a Paralegal will parse contract language from complementary angles.
+
+Each peer also gets a randomly generated agent name — **Nova**, **Onyx·2**, **Aria**, **Vega** — that appears in the conversation and which the agent uses to refer to itself.
+
+---
+
+## AI Models (each peer chooses independently)
+
+| Model | Size | Notes |
+|-------|------|-------|
+| Llama 3.2 · 1B | ~800 MB | Fastest, good for quick sessions |
+| Llama 3.2 · 3B | ~2 GB | Balanced quality and speed |
+| Phi-3.5 Mini | ~2.2 GB | Strong reasoning |
+| Gemma 2 · 2B | ~1.5 GB | Google architecture |
+| Mistral 7B | ~4 GB | Highest quality, needs a good GPU |
+| Qwen 2.5 · 1.5B | ~1 GB | Efficient, multilingual capable |
+
+Models download once and are cached in your browser. Both peers can run completely different models — only the generated text crosses the WebRTC channel.
+
+---
+
+## Connecting — Step by Step
+
+**You (the host):**
+1. Open the app → note your randomly assigned agent name
+2. Pick a model and persona
+3. Click **Confirm & Generate Invite**
+4. Click **Copy Invite Link** and send it to your peer (via any chat app, SMS, email)
+5. Wait for their answer token, paste it, click **Connect**
+
+**Your peer (the joiner):**
+1. Open your invite link
+2. Pick their own model and persona
+3. Copy the answer token that appears
+4. Send it back to you
+
+Once both models finish loading, the agents start talking automatically.
+
+---
+
+## Tech Stack
+
+| What | Why |
+|------|-----|
+| **WebRTC** | Direct encrypted peer-to-peer data channel — no relay for actual data |
+| **WebLLM** | Runs LLMs in the browser via WebGPU — no API key, no cloud |
+| **Vite** | Build tooling |
+| **GitHub Pages** | Static hosting — serves only HTML/JS/CSS, no server-side compute |
+| **Public STUN** | NAT traversal only — sees no conversation data |
+
+**Requirements:** A modern browser with WebGPU support (Chrome 113+, Edge 113+). A GPU helps — integrated works for 1B models, discrete recommended for 7B.
+
+---
+
+## What You Do NOT Need
+
+```
+✗ An API key          ✗ A server
+✗ A cloud account     ✗ A subscription
+✗ Node.js             ✗ Any installation
+✗ A data agreement with an AI provider
+```
+
+---
+
+## Local Development
+
+```bash
+git clone https://github.com/vishalmysore/agentWorkBook.git
+cd agentWorkBook
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+---
+
+## Deployment
+
+Pushes to `main` automatically deploy to GitHub Pages via GitHub Actions.
+
+To activate: go to your repo **Settings → Pages → Source → GitHub Actions**.
+
+---
+
+## Further Reading
+
+- **[ARTICLE.md](ARTICLE.md)** — detailed article covering e-commerce, healthcare, legal, and multi-domain use cases with example conversations
+- **[Source code](https://github.com/vishalmysore/agentWorkBook)**
+
+---
+
+## License
+
+MIT
+
+---
+
+*Built with ❤️ by Vishal Mysore*
