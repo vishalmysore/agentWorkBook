@@ -520,3 +520,116 @@ input[type="text"]:disabled {
   .room-id-display { font-size: 1.4rem; }
   .connect-row { flex-direction: column; }
 }
+
+/* ── Room panel ── */
+.room-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.peers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.peer-entry {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.875rem;
+}
+
+.peer-entry.peer-me {
+  border-color: rgba(99,102,241,0.4);
+  background: rgba(99,102,241,0.07);
+}
+
+.peer-emoji { font-size: 1rem; flex-shrink: 0; }
+.peer-name  { font-weight: 600; color: var(--text); flex-shrink: 0; }
+.peer-role  { color: var(--muted); font-size: 0.82rem; flex-shrink: 0; }
+.peer-model { color: var(--muted); font-size: 0.78rem; margin-left: auto; flex-shrink: 0; }
+
+.peer-pill {
+  padding: 0.12rem 0.55rem;
+  border-radius: 99px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.peer-pill-you { background: rgba(99,102,241,0.2); color: var(--primary); }
+.peer-pill-on  { background: rgba(63,185,80,0.15); color: var(--success); }
+
+.btn-invite {
+  padding: 0.35rem 0.8rem;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.btn-invite:hover:not(:disabled) { background: var(--primary-dark); }
+.btn-invite:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Human guidance panel ── */
+.guidance-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.6rem;
+}
+
+.guidance-live-hint {
+  font-size: 0.7rem;
+  color: var(--success);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.8;
+}
+
+.guidance-input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.guidance-input:focus { border-color: var(--primary); }
+.guidance-input::placeholder { color: var(--muted); font-style: italic; }
+
+.guidance-sub {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+/* ── System messages (join / leave) ── */
+.msg-system {
+  text-align: center;
+  font-size: 0.76rem;
+  color: var(--muted);
+  padding: 0.2rem 0;
+  opacity: 0.7;
+}

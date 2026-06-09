@@ -113,6 +113,13 @@
           </div>
         </div>
 
+        <div style="margin-top:1rem">
+          <label class="field-label">Agent Instructions (optional)</label>
+          <textarea id="setup-guidance" class="guidance-input"
+            placeholder="Give your agent a focus… e.g. 'Always advocate for TDD' or 'Stay sceptical of new features'"
+            rows="2"></textarea>
+        </div>
+
         <div class="btn-row" style="margin-top:1.25rem">
           <button id="setup-done-btn" class="btn-primary">✓ Confirm & Generate Invite</button>
           <span id="setup-summary" class="setup-summary"></span>
@@ -221,6 +228,38 @@
           <div class="progress-bar" id="progress-bar" style="width:0%"></div>
         </div>
         <p class="muted" id="model-hint">Model cached in browser after first download. Both peers load independently.</p>
+      </section>
+
+      <!-- Human guidance panel -->
+      <section class="card">
+        <div class="guidance-header">
+          <div class="step-label" style="margin-bottom:0">GUIDE YOUR AGENT</div>
+          <span class="guidance-live-hint">updates live</span>
+        </div>
+        <textarea id="human-guidance" class="guidance-input"
+          placeholder="Optional: steer your agent… e.g. 'focus on security risks', 'push back more', 'ask about timelines'"
+          rows="2"></textarea>
+        <div class="btn-row" style="margin-top:0.5rem">
+          <button id="nudge-btn" class="btn-secondary" style="display:none">💬 Nudge Now</button>
+          <span class="guidance-sub">Takes effect on the next reply — or click Nudge Now to speak immediately.</span>
+        </div>
+      </section>
+
+      <!-- Room members panel -->
+      <section class="card">
+        <div class="room-header">
+          <div class="step-label" style="margin-bottom:0">ROOM MEMBERS</div>
+          <button id="invite-more-btn" class="btn-invite" style="display:none">+ Invite Another Agent</button>
+        </div>
+        <div id="peers-list" class="peers-list"></div>
+        <div id="invite-url-wrap" style="display:none; margin-top:0.9rem">
+          <p class="muted" style="margin:0 0 0.5rem">Share this invite link with the next agent:</p>
+          <textarea id="invite-url" class="sdp-box" readonly rows="2"></textarea>
+          <div class="btn-row">
+            <button id="copy-invite-btn" class="btn-primary">📋 Copy Invite</button>
+            <span id="invite-copied" class="copied-hint" style="display:none">Copied!</span>
+          </div>
+        </div>
       </section>
 
       <section class="card">
