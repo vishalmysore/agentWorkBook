@@ -396,7 +396,7 @@ nudgeBtn?.addEventListener('click', async () => {
   if (!myModelReady || !agentRunning) return;
   nudgeBtn.disabled = true;
   nudgeBtn.textContent = '…thinking';
-  await agentReply();
+  await agentReply(true); // nudged = true
   nudgeBtn.disabled = false;
   nudgeBtn.textContent = '💬 Nudge Now';
 });
@@ -500,7 +500,7 @@ function buildLLMMessages() {
 
 function onChatReceived(fromName, msg) {
   conversationHistory.push({ name: fromName, content: msg.content });
-  appendMessage('peer', msg.content, msg.persona, fromName);
+  appendMessage('peer', msg.content, msg.persona, fromName, msg.nudged);
   // Back off if a reply was already queued — another voice spoke first.
   if (replyTimer) speakBackoff = Math.min(speakBackoff * 1.5, 6000);
   scheduleReply();
@@ -534,20 +534,20 @@ async function agentSendFirst() {
   sendChat(res.choices[0].message.content.trim());
 }
 
-async function agentReply() {
+async function agentReply(nudged = false) {
   if (!engine || !pm || pm.getConnected().length === 0) return;
   const res = await engine.chat.completions.create({
     messages:    buildLLMMessages(),
     temperature: 0.85,
     max_tokens:  180,
   });
-  sendChat(res.choices[0].message.content.trim());
+  sendChat(res.choices[0].message.content.trim(), nudged);
 }
 
-function sendChat(text) {
+function sendChat(text, nudged = false) {
   conversationHistory.push({ name: MY_AGENT_NAME, content: text });
-  appendMessage('me', text, myPersona, MY_AGENT_NAME);
-  pm.broadcast({ type: 'chat', content: text, persona: myPersona });
+  appendMessage('me', text, myPersona, MY_AGENT_NAME, nudged);
+  pm.broadcast({ type: 'chat', content: text, persona: myPersona, nudged });
 }
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
@@ -607,21 +607,27 @@ function updateAgentStatusBar() {
   setAgentStatus(`${MY_AGENT_NAME} ↔ ${names} — conversation active`);
 }
 
-function appendMessage(side, text, personaKey, name) {
+function appendMessage(side, text, personaKey, name, nudged = false) {
   const p = personaKey
     ? (PERSONAS[personaKey] ?? { emoji: '🤖', label: personaKey })
     : { emoji: '🤖', label: 'Agent' };
   const displayName = name ?? (side === 'me' ? MY_AGENT_NAME : 'Peer');
 
-  const wrap   = document.createElement('div');
+  const wrap = document.createElement('div');
   wrap.className = `message ${side === 'me' ? 'msg-me' : 'msg-peer'}`;
 
-  const lbl    = document.createElement('div');
-  lbl.className  = 'msg-label';
+  const lbl = document.createElement('div');
+  lbl.className = 'msg-label';
   lbl.textContent = `${p.emoji} ${displayName} · ${p.label}`;
+  if (nudged) {
+    const tag = document.createElement('span');
+    tag.className = 'nudge-tag';
+    tag.textContent = '👤 human-guided';
+    lbl.appendChild(tag);
+  }
 
   const bubble = document.createElement('div');
-  bubble.className  = 'msg-bubble';
+  bubble.className = 'msg-bubble';
   bubble.textContent = text;
 
   wrap.appendChild(lbl);
