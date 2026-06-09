@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  base: '/agentWorkBook/',
+  base: '/agentHerd/',
   optimizeDeps: {
     exclude: ['@mlc-ai/web-llm'],
   },
