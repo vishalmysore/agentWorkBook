@@ -489,6 +489,12 @@ function buildLLMMessages() {
       msgs.push({ role: 'user', content: `[${m.name}]: ${m.content}` });
     }
   }
+  // WebLLM requires the final message to be role 'user'.
+  // This can fail when the agent speaks last (e.g. Nudge Now after own reply).
+  const last = msgs[msgs.length - 1];
+  if (!last || last.role !== 'user') {
+    msgs.push({ role: 'user', content: 'Please continue the conversation.' });
+  }
   return msgs;
 }
 
