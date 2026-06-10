@@ -39,6 +39,36 @@ const PERSONAS = {
   nurse:         { label: 'Nurse',              emoji: '💊',   domain: 'Healthcare', prompt: 'You are a nurse practitioner AI agent. You focus on patient care, clinical workflows, medication management, and holistic wellbeing. You bridge clinical knowledge with compassionate care and advocate for practical, patient-centered solutions.' },
 };
 
+// ── Task/project definitions, grouped by domain ─────────────────────────────
+const TASKS = {
+  Software: [
+    { id: 'library',   label: 'Library Management System', description: 'Design and build a system for managing books, members, loans, and reservations at a library.' },
+    { id: 'music',     label: 'Music Catalog System',       description: 'Design and build a system for cataloging artists, albums, tracks, and playlists.' },
+    { id: 'inventory', label: 'Inventory Tracking System',  description: 'Design and build a system for tracking warehouse stock levels, suppliers, and orders.' },
+    { id: 'taskboard', label: 'Task/Project Management Tool', description: 'Design and build a tool for tracking projects, tasks, assignees, and deadlines.' },
+  ],
+  Legal: [
+    { id: 'contract-dispute', label: 'Contract Dispute Case',          description: 'Work through a case involving a breach of contract between two business parties.' },
+    { id: 'employment',       label: 'Employment Discrimination Case', description: 'Work through a case involving alleged workplace discrimination.' },
+    { id: 'ip-case',          label: 'Intellectual Property Case',     description: 'Work through a case involving disputed ownership of a patent or trademark.' },
+    { id: 'personal-injury',  label: 'Personal Injury Case',           description: 'Work through a case involving a claim for damages after an accident.' },
+  ],
+  Healthcare: [
+    { id: 'diabetes-care',     label: 'Diabetes Care Plan',                  description: 'Discuss a treatment, monitoring, and lifestyle plan for a newly diagnosed Type 2 diabetes patient.' },
+    { id: 'post-op',           label: 'Post-Operative Recovery Case',        description: 'Discuss the recovery plan, monitoring, and follow-up care for a patient after major surgery.' },
+    { id: 'outbreak-response', label: 'Infectious Disease Outbreak Response', description: 'Plan the clinical and public-health response to a localized infectious disease outbreak.' },
+    { id: 'chronic-pain',      label: 'Chronic Pain Management Case',        description: 'Discuss a long-term pain management plan for a patient with chronic back pain.' },
+  ],
+};
+
+function domainOf(personaKey) {
+  return PERSONAS[personaKey]?.domain ?? 'Software';
+}
+
+function findTask(domain, taskId) {
+  return (TASKS[domain] ?? []).find(t => t.id === taskId) ?? null;
+}
+
 const MODELS = [
   { id: 'Llama-3.2-1B-Instruct-q4f16_1-MLC',    label: 'Llama 3.2 · 1B',  size: '~800 MB' },
   { id: 'Llama-3.2-3B-Instruct-q4f16_1-MLC',    label: 'Llama 3.2 · 3B',  size: '~2 GB'   },
@@ -64,6 +94,10 @@ let currentInviteSlot = null;
 let myPersona    = 'developer';
 let myModelId    = MODELS[0].id;
 let humanGuidance = ''; // updated live by the human operator
+let myDomain     = 'Software';
+let myTaskId     = '';   // '' = no specific task chosen
+let lockedDomain = null; // set for answerers — domain enforced by the invite link
+let lockedTaskId = null; // set for answerers when the inviter already picked a task
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 const viewSetup     = document.getElementById('view-setup');
@@ -113,6 +147,9 @@ const inviteUrlWrap  = document.getElementById('invite-url-wrap');
 const inviteUrlEl    = document.getElementById('invite-url');
 const copyInviteBtn  = document.getElementById('copy-invite-btn');
 const inviteCopied   = document.getElementById('invite-copied');
+const inviteAnswerInputEl = document.getElementById('invite-answer-input');
+const inviteConnectBtn    = document.getElementById('invite-connect-btn');
+const inviteConnStatus    = document.getElementById('invite-conn-status');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function show(el) { el.style.display = 'block'; }
@@ -163,17 +200,45 @@ function initPM() {
 setupDoneBtn.addEventListener('click', () => {
   myPersona     = getSelectedValue('persona') || 'developer';
   myModelId     = getSelectedValue('model')   || MODELS[0].id;
+  myDomain      = domainOf(myPersona);
+  myTaskId      = getSelectedValue('task')    || '';
   humanGuidance = setupGuidanceEl?.value.trim() || '';
   const p = PERSONAS[myPersona], m = MODELS.find(x => x.id === myModelId);
-  setupSummary.textContent = `${p.emoji} ${p.label} · ${m.label}`;
+  const t = findTask(myDomain, myTaskId);
+  setupSummary.textContent = `${p.emoji} ${p.label} · ${m.label}` + (t ? ` · ${t.label}` : '');
   hide(viewSetup);
   show(viewLoading);
   startAsCreator();
 });
 
+// Persona radios on the setup view determine which task list is shown
+// (a task belongs to the same domain as the chosen persona).
+document.querySelectorAll('input[name="persona"]').forEach(el => {
+  el.addEventListener('change', () => updateTaskGroups('task-groups', getSelectedValue('persona')));
+});
+updateTaskGroups('task-groups', getSelectedValue('persona'));
+
+function updateTaskGroups(containerId, personaKey, domainOverride) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const domain = domainOverride || domainOf(personaKey);
+  container.querySelectorAll('[data-task-domain]').forEach(group => {
+    group.style.display = group.dataset.taskDomain === domain ? '' : 'none';
+  });
+  // Make sure a "no task" option is selected by default for the visible group.
+  const visibleGroup = container.querySelector(`[data-task-domain="${domain}"]`);
+  const checked = visibleGroup?.querySelector('input[type="radio"]:checked');
+  if (!checked) {
+    const blank = visibleGroup?.querySelector('input[type="radio"][value=""]');
+    if (blank) blank.checked = true;
+  }
+}
+
 answererSetupBtn?.addEventListener('click', () => {
   myPersona = getSelectedValue('persona-b') || 'developer';
   myModelId = getSelectedValue('model-b')   || MODELS[0].id;
+  myDomain  = lockedDomain || domainOf(myPersona);
+  myTaskId  = lockedTaskId ?? (getSelectedValue('task-b') || '');
   hide(answererSetupDiv);
   show(viewLoading);
   generateAnswer();
@@ -192,7 +257,11 @@ async function genInvite(isFirst) {
   currentInviteSlot = slot;
 
   const sdp  = await pm.createOffer(slot);
-  const url  = `${location.origin}${location.pathname}#offer=${await encodeSDP(sdp)}`;
+  const params = new URLSearchParams();
+  params.set('offer', await encodeSDP(sdp));
+  params.set('domain', myDomain);
+  if (myTaskId) params.set('task', myTaskId);
+  const url = `${location.origin}${location.pathname}#${params.toString()}`;
 
   if (isFirst) {
     offerUrlEl.value = url;
@@ -228,17 +297,81 @@ async function genInvite(isFirst) {
       inviteCopied.style.display = 'inline';
       setTimeout(() => (inviteCopied.style.display = 'none'), 2500);
     };
+
+    inviteAnswerInputEl.value    = '';
+    inviteAnswerInputEl.disabled = false;
+    inviteConnectBtn.disabled    = false;
+    setStatus(inviteConnStatus, 'Waiting…', 'idle');
+
+    inviteConnectBtn.onclick = async () => {
+      const raw = inviteAnswerInputEl.value.trim();
+      if (!raw) return;
+      try {
+        inviteConnectBtn.disabled    = true;
+        inviteAnswerInputEl.disabled = true;
+        setStatus(inviteConnStatus, 'Setting remote description…', 'connecting');
+        await pm.setAnswer(slot, await decodeSDP(raw));
+        setStatus(inviteConnStatus, 'WebRTC connected! 🎉', 'connected');
+      } catch {
+        setStatus(inviteConnStatus, 'Invalid answer token. Try again.', 'error');
+        inviteConnectBtn.disabled    = false;
+        inviteAnswerInputEl.disabled = false;
+      }
+    };
   }
 }
 
 // ── Joiner (answerer) flow ───────────────────────────────────────────────────
 let pendingOffer = null;
 
-async function startAsAnswerer(offerToken) {
+async function startAsAnswerer(offerToken, domain, taskId) {
   try { pendingOffer = await decodeSDP(offerToken); }
   catch { loadingText.textContent = '❌ Invalid invite link.'; return; }
+
+  lockedDomain = TASKS[domain] ? domain : 'Software';
+  lockedTaskId = taskId || null;
+  applyDomainLock();
+
   hide(viewLoading);
   show(viewAnswerer);
+}
+
+// Restrict the answerer's persona/task choices to the domain (and optionally
+// the task) chosen by the room creator, so everyone in the room stays aligned.
+function applyDomainLock() {
+  // Persona chips: hide domains other than the locked one.
+  document.querySelectorAll('#answerer-setup .domain-group[data-domain]').forEach(group => {
+    group.style.display = group.dataset.domain === lockedDomain ? '' : 'none';
+  });
+  const checkedPersona = document.querySelector('input[name="persona-b"]:checked');
+  if (!checkedPersona || domainOf(checkedPersona.value) !== lockedDomain) {
+    const firstInDomain = document.querySelector(`#answerer-setup .domain-group[data-domain="${lockedDomain}"] input[name="persona-b"]`);
+    if (firstInDomain) firstInDomain.checked = true;
+  }
+
+  const hint = document.getElementById('domain-lock-hint');
+  if (hint) {
+    hint.style.display = '';
+    hint.textContent = `This room is for the ${lockedDomain} domain — your agent persona must come from here.`;
+  }
+
+  // Task: if the inviter already chose one, lock it in and hide the picker.
+  const taskGroupsB = document.getElementById('task-groups-b');
+  const lockedDisplay = document.getElementById('locked-task-display');
+  const task = lockedTaskId ? findTask(lockedDomain, lockedTaskId) : null;
+  if (task) {
+    if (taskGroupsB) hide(taskGroupsB);
+    if (lockedDisplay) {
+      lockedDisplay.style.display = '';
+      lockedDisplay.textContent = `📌 ${task.label} — ${task.description}`;
+    }
+  } else {
+    if (lockedDisplay) hide(lockedDisplay);
+    if (taskGroupsB) {
+      show(taskGroupsB);
+      updateTaskGroups('task-groups-b', /* force */ null, lockedDomain);
+    }
+  }
 }
 
 async function generateAnswer() {
@@ -470,10 +603,12 @@ function buildSystemPrompt() {
     .map(p => { const pp = PERSONAS[p.persona] ?? { label: p.persona, emoji: '🤖' }; return `${p.name} (${pp.emoji} ${pp.label})`; })
     .join(', ');
   const guidance = humanGuidance.trim();
+  const task = myTaskId ? findTask(myDomain, myTaskId) : null;
   return (
     `Your name is ${MY_AGENT_NAME}. ${me.prompt}\n\n` +
     `You are in a peer-to-peer AI agent room — no humans, no servers. ` +
     (peerDescs ? `Other agents in the room: ${peerDescs}. ` : '') +
+    (task ? `\n\nThe room's shared project is the "${task.label}": ${task.description} Keep the discussion focused on this project. ` : '') +
     `Always identify yourself as ${MY_AGENT_NAME}. Address others by name. ` +
     `Keep replies concise (2–4 sentences). Build on what others say.` +
     (guidance ? `\n\nYour operator's current instruction: "${guidance}". Incorporate this naturally.` : '')
@@ -558,6 +693,18 @@ function showAgentIdentity() {
     `<span class="identity-name">${MY_AGENT_NAME}</span>` +
     `<span class="identity-badge">${p.emoji} ${p.label}</span>` +
     `<span class="identity-model">${m?.label ?? myModelId}</span>`;
+
+  const banner = document.getElementById('room-task-banner');
+  if (banner) {
+    const task = myTaskId ? findTask(myDomain, myTaskId) : null;
+    if (task) {
+      banner.style.display = '';
+      banner.textContent = `📌 Project: ${task.label} — ${task.description}`;
+    } else {
+      banner.style.display = '';
+      banner.textContent = `Domain: ${myDomain} — no specific project chosen.`;
+    }
+  }
   updatePeersList();
 }
 
@@ -659,13 +806,13 @@ function setAgentStatus(text) { agentStatusEl.textContent = text; }
 const nameBanner = document.getElementById('my-name-banner');
 if (nameBanner) nameBanner.textContent = MY_AGENT_NAME;
 
-const hash       = location.hash;
-const offerMatch = hash.match(/[#&]offer=([^&]+)/);
+const hashParams = new URLSearchParams(location.hash.replace(/^#/, ''));
+const offerToken = hashParams.get('offer');
 
-if (offerMatch) {
+if (offerToken) {
   hide(viewSetup);
   show(viewAnswerer);
-  startAsAnswerer(offerMatch[1]);
+  startAsAnswerer(offerToken, hashParams.get('domain'), hashParams.get('task'));
 } else {
   show(viewSetup);
 }
