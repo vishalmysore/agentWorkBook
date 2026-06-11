@@ -742,3 +742,47 @@ input[type="text"]:disabled {
 
 .chess-light { background: #b8c0d0; color: #111; }
 .chess-dark  { background: #5a6478; color: #111; }
+
+/* ── Tic-tac-toe & Connect Four boards ── */
+.ttt-board {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  max-width: 240px;
+  margin: 0 auto;
+  gap: 4px;
+}
+
+.ttt-sq {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  font-size: 2rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  user-select: none;
+}
+
+.c4-board {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  max-width: 380px;
+  margin: 0 auto;
+  gap: 3px;
+  padding: 6px;
+  background: rgba(99,102,241,0.15);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+}
+
+.c4-sq {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  font-size: 1.3rem;
+  background: var(--surface);
+  border-radius: 50%;
+  user-select: none;
+}

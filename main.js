@@ -41,8 +41,8 @@ const PERSONAS = {
   detective:     { label: 'Detective',          emoji: '🕵️',  domain: 'Detective',  prompt: 'You are a private detective AI agent. You think in terms of motive, means, and opportunity. You build timelines, interrogate inconsistencies in alibis, follow the evidence wherever it leads, and form working theories of the case that you revise as new facts emerge. You are observant, sceptical, and methodical.' },
   forensic:      { label: 'Forensic Analyst',   emoji: '🔬',   domain: 'Detective',  prompt: 'You are a forensic analyst AI agent. You focus on physical evidence: fingerprints, DNA, trace materials, ballistics, digital footprints, and document analysis. You insist on chain of custody, distinguish what evidence proves from what it merely suggests, and ground every conclusion in verifiable analysis.' },
   profiler:      { label: 'Criminal Profiler',  emoji: '🧠',   domain: 'Detective',  prompt: 'You are a criminal profiler AI agent. You analyze behavior, psychology, and patterns: why a perpetrator acted, what their actions reveal about them, and how they are likely to behave next. You build offender profiles from crime scene behavior and victimology, and you challenge theories that don\'t fit the psychology.' },
-  grandmaster:   { label: 'Chess Grandmaster',  emoji: '♚',    domain: 'Games',      prompt: 'You are a chess grandmaster AI agent. You play principled, positional chess: control the center, develop pieces, king safety, and long-term plans. Your commentary is calm, precise, and occasionally devastating in its understatement.' },
-  hustler:       { label: 'Park Chess Hustler', emoji: '♟️',  domain: 'Games',      prompt: 'You are a park chess hustler AI agent. You play sharp, aggressive, trappy chess and love sacrifices and swindles. Your commentary is fast-talking, cocky street banter — you trash-talk between moves, but you respect a good move when you see one.' },
+  grandmaster:   { label: 'Grandmaster',        emoji: '♚',    domain: 'Games',      prompt: 'You are a grandmaster AI agent who excels at strategy board games (chess, tic-tac-toe, Connect Four). You play principled, positional strategy: control the center, think several moves ahead, and never blunder. Your commentary is calm, precise, and occasionally devastating in its understatement.' },
+  hustler:       { label: 'Park Hustler',       emoji: '♟️',  domain: 'Games',      prompt: 'You are a park games hustler AI agent who plays chess, tic-tac-toe, and Connect Four for bragging rights. You play sharp, aggressive, trappy moves and love swindles. Your commentary is fast-talking, cocky street banter — you trash-talk between moves, but you respect a good move when you see one.' },
   informant:     { label: 'Street Informant',   emoji: '🗞️',  domain: 'Detective',  prompt: 'You are a street informant AI agent. You know the neighborhood, the rumors, who owes whom, and what happened the night in question. You contribute local knowledge, gossip, and leads the official investigation would miss — some reliable, some needing verification. You speak plainly and colorfully.' },
 };
 
@@ -73,7 +73,9 @@ const TASKS = {
     { id: 'poisoned-pen',     label: 'The Poisoned Pen Letters',   description: 'Identify who is sending threatening letters to members of the town council. The letters use cut-out newspaper print, show inside knowledge of council votes, and the latest one correctly predicted a fire at the mayor\'s warehouse.' },
   ],
   Games: [
-    { id: 'chess', label: 'Chess Match', description: 'Play a full game of chess against the other agent — two players only. The room creator plays White, the joiner plays Black. Moves are validated by a real chess engine; the agents pick the moves and provide commentary in character.' },
+    { id: 'chess',     label: 'Chess Match',  description: 'Play a full game of chess against the other agent — two players only. The room creator plays White, the joiner plays Black. Moves are validated by a real chess engine; the agents pick the moves and provide commentary in character.' },
+    { id: 'tictactoe', label: 'Tic-Tac-Toe',  description: 'Play tic-tac-toe against the other agent — two players only. The room creator plays X, the joiner plays O. Best banter wins (the game itself is usually a draw).' },
+    { id: 'connect4',  label: 'Connect Four', description: 'Play Connect Four against the other agent — two players only. The room creator drops Red discs, the joiner drops Yellow. First to line up four in a row wins.' },
   ],
 };
 
@@ -128,9 +130,9 @@ let lockedTaskId = null; // set for answerers when the inviter already picked a 
 // myDocuments:   docs this agent owns — full text stays local, only summaries leave.
 // peerDocuments: summaries of docs owned by other agents, keyed by docId.
 // Chess match state (Games domain, 'chess' task).
-let chessGame   = null;  // chess.js instance, mirrored on both peers
-let chessColor  = null;  // 'w' (room creator) or 'b' (joiner)
-let chessActive = false;
+let gameObj    = null;  // game state object, mirrored on both peers
+let mySide     = null;  // 'w' (room creator, moves first) or 'b' (joiner)
+let gameActive = false;
 
 let myDocuments   = new Map(); // docId → {id, name, text, summary}
 let peerDocuments = new Map(); // docId → {id, name, summary, owner}
@@ -495,8 +497,8 @@ function handlePeerJoin(name, hello) {
   if (myModelReady && !agentRunning) {
     agentRunning = true;
     updateAgentStatusBar();
-    if (chessEnabled()) {
-      startChessIfReady();
+    if (gameEnabled()) {
+      startGameIfReady();
     } else if (isRoomCreator && pm.getConnected().length === 1) {
       setTimeout(() => agentSendFirst(), 600);
     }
@@ -520,7 +522,7 @@ async function handleMsg(fromName, msg) {
     case 'room-members':   /* Offers will arrive via 'signal' */  break;
     case 'make-offer-for': await makeOfferFor(msg.target, fromName); break;
     case 'signal':         await handleSignal(fromName, msg);     break;
-    case 'chess-move':     onChessMove(fromName, msg);            break;
+    case 'game-move':      onGameMove(fromName, msg);             break;
     case 'doc-summary':    onDocSummary(fromName, msg);           break;
     case 'doc-query':      await onDocQuery(fromName, msg);       break;
     case 'doc-answer':     onDocAnswer(fromName, msg);            break;
@@ -577,7 +579,7 @@ function onConnected() {
   show(viewConnected);
   showAgentIdentity();
   // Chess is strictly two players — no inviting more agents into a match.
-  if (isRoomCreator && !chessEnabled()) inviteMoreBtn.style.display = 'inline-block';
+  if (isRoomCreator && !gameEnabled()) inviteMoreBtn.style.display = 'inline-block';
   if (nudgeBtn) nudgeBtn.style.display = 'inline-block';
   syncGuidanceFromSetup();
   if (humanGuidanceEl) humanGuidanceEl.placeholder = GUIDANCE_HINTS[myDomain] ?? GUIDANCE_HINTS.Software;
@@ -659,11 +661,11 @@ async function loadModel() {
 
   // Chess rooms: start the match (or, if Black already received White's first
   // move while our model was loading, respond to it now).
-  if (chessEnabled()) {
-    if (chessActive && chessGame && chessGame.turn() === chessColor) {
-      setTimeout(() => makeChessMove(), 800);
+  if (gameEnabled()) {
+    if (gameActive && gameObj && currentGameDef.turn(gameObj) === mySide) {
+      setTimeout(() => makeGameMove(), 800);
     } else {
-      startChessIfReady();
+      startGameIfReady();
     }
     return;
   }
@@ -744,7 +746,7 @@ function onChatReceived(fromName, msg) {
 
 function scheduleReply() {
   if (!myModelReady || !agentRunning) return;
-  if (chessEnabled()) return; // chess rooms talk through moves, not free chat
+  if (gameEnabled()) return; // game rooms talk through moves, not free chat
   clearTimeout(replyTimer);
   const delay = speakBackoff + Math.random() * 2500;
   replyTimer = setTimeout(async () => {
@@ -1001,46 +1003,179 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-// ── Chess match (Games domain) ───────────────────────────────────────────────
-// Two players only: the room creator plays White, the joiner plays Black.
-// Both peers mirror the game in a chess.js instance; only SAN moves cross the
-// wire, and every move is validated by the engine — the LLM picks from the
-// legal-move list, so an illegal suggestion can never corrupt the game.
-function chessEnabled() { return myTaskId === 'chess'; }
+// ── 2-player game matches (Games domain) ────────────────────────────────────
+// Generic framework: every game is two players only — the room creator plays
+// side 'w' (first to move), the joiner plays side 'b'. Both peers mirror the
+// game state locally; only validated moves cross the wire. The LLM picks a
+// move from the engine-provided legal list, so an illegal suggestion can never
+// corrupt the game.
 
-function startChessIfReady() {
-  if (!chessEnabled() || chessActive || !myModelReady) return;
+const CHESS_GLYPHS = {
+  w: { p: '♙', n: '♘', b: '♗', r: '♖', q: '♕', k: '♔' },
+  b: { p: '♟', n: '♞', b: '♝', r: '♜', q: '♛', k: '♚' },
+};
+
+const TTT_LINES = [
+  [0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6],
+];
+
+function gridWinner(cells, cols, rows, needed) {
+  const at = (c, r) => (c >= 0 && c < cols && r >= 0 && r < rows) ? cells[r * cols + c] : null;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const v = at(c, r);
+    if (!v) continue;
+    for (const [dc, dr] of [[1,0],[0,1],[1,1],[1,-1]]) {
+      let n = 1;
+      while (n < needed && at(c + dc * n, r + dr * n) === v) n++;
+      if (n >= needed) return v;
+    }
+  }
+  return null;
+}
+
+const GAMES = {
+  chess: {
+    label: 'Chess', icon: '♟️',
+    sides: { w: 'White', b: 'Black' },
+    init:       () => new Chess(),
+    legalMoves: g => g.moves(),
+    move:       (g, m) => g.move(m),
+    turn:       g => g.turn(),
+    history:    g => g.history(),
+    stateText:  g => `Position (FEN): ${g.fen()}${g.inCheck() ? ' — you are in CHECK' : ''}`,
+    isOver:     g => g.isGameOver(),
+    result:     g => {
+      if (g.isCheckmate()) return `Checkmate — ${g.turn() === 'w' ? 'Black' : 'White'} wins! 🏆`;
+      if (g.isStalemate()) return 'Stalemate — draw.';
+      if (g.isThreefoldRepetition()) return 'Draw by threefold repetition.';
+      if (g.isInsufficientMaterial()) return 'Draw — insufficient material.';
+      return 'Draw.';
+    },
+    renderHTML: g => {
+      let html = '<div class="chess-board">';
+      g.board().forEach((row, r) => row.forEach((sq, c) => {
+        const dark = (r + c) % 2 === 1;
+        html += `<div class="chess-sq ${dark ? 'chess-dark' : 'chess-light'}">${sq ? CHESS_GLYPHS[sq.color][sq.type] : ''}</div>`;
+      }));
+      return html + '</div>';
+    },
+  },
+
+  tictactoe: {
+    label: 'Tic-Tac-Toe', icon: '❌',
+    sides: { w: 'X', b: 'O' },
+    init:       () => ({ cells: Array(9).fill(null), turn: 'w', moves: [] }),
+    // Moves are cell numbers 1-9, numbered left-to-right, top-to-bottom.
+    legalMoves: g => g.cells.map((v, i) => v ? null : String(i + 1)).filter(Boolean),
+    move:       (g, m) => {
+      const i = parseInt(m, 10) - 1;
+      if (!(i >= 0 && i < 9) || g.cells[i]) throw new Error('illegal move');
+      g.cells[i] = g.turn;
+      g.moves.push(m);
+      g.turn = g.turn === 'w' ? 'b' : 'w';
+    },
+    turn:       g => g.turn,
+    history:    g => g.moves,
+    stateText:  g => {
+      const s = i => g.cells[i] ? (g.cells[i] === 'w' ? 'X' : 'O') : String(i + 1);
+      return `Board (pick the number of an empty cell):\n${s(0)} ${s(1)} ${s(2)}\n${s(3)} ${s(4)} ${s(5)}\n${s(6)} ${s(7)} ${s(8)}`;
+    },
+    isOver:     g => !!TTT_LINES.find(([a,b,c]) => g.cells[a] && g.cells[a] === g.cells[b] && g.cells[a] === g.cells[c]) || g.cells.every(Boolean),
+    result:     g => {
+      const line = TTT_LINES.find(([a,b,c]) => g.cells[a] && g.cells[a] === g.cells[b] && g.cells[a] === g.cells[c]);
+      if (line) return `${g.cells[line[0]] === 'w' ? 'X' : 'O'} wins! 🏆`;
+      return "It's a draw.";
+    },
+    renderHTML: g => {
+      let html = '<div class="ttt-board">';
+      g.cells.forEach(v => {
+        html += `<div class="ttt-sq">${v ? (v === 'w' ? '❌' : '⭕') : ''}</div>`;
+      });
+      return html + '</div>';
+    },
+  },
+
+  connect4: {
+    label: 'Connect Four', icon: '🔴',
+    sides: { w: 'Red', b: 'Yellow' },
+    // cells[r * 7 + c], row 0 = top. Moves are column numbers 1-7.
+    init:       () => ({ cells: Array(42).fill(null), turn: 'w', moves: [] }),
+    legalMoves: g => [1,2,3,4,5,6,7].filter(col => !g.cells[col - 1]).map(String),
+    move:       (g, m) => {
+      const c = parseInt(m, 10) - 1;
+      if (!(c >= 0 && c < 7) || g.cells[c]) throw new Error('illegal move');
+      for (let r = 5; r >= 0; r--) {
+        if (!g.cells[r * 7 + c]) { g.cells[r * 7 + c] = g.turn; break; }
+      }
+      g.moves.push(m);
+      g.turn = g.turn === 'w' ? 'b' : 'w';
+    },
+    turn:       g => g.turn,
+    history:    g => g.moves,
+    stateText:  g => {
+      let out = 'Board (drop a disc by column number, R=Red, Y=Yellow, .=empty):\n1 2 3 4 5 6 7\n';
+      for (let r = 0; r < 6; r++) {
+        out += [0,1,2,3,4,5,6].map(c => g.cells[r * 7 + c] ? (g.cells[r * 7 + c] === 'w' ? 'R' : 'Y') : '.').join(' ') + '\n';
+      }
+      return out;
+    },
+    isOver:     g => !!gridWinner(g.cells, 7, 6, 4) || g.cells.every(Boolean),
+    result:     g => {
+      const win = gridWinner(g.cells, 7, 6, 4);
+      if (win) return `${win === 'w' ? 'Red' : 'Yellow'} wins! 🏆`;
+      return "It's a draw.";
+    },
+    renderHTML: g => {
+      let html = '<div class="c4-board">';
+      g.cells.forEach(v => {
+        html += `<div class="c4-sq">${v ? (v === 'w' ? '🔴' : '🟡') : ''}</div>`;
+      });
+      return html + '</div>';
+    },
+  },
+};
+
+let currentGameDef = null; // GAMES[myTaskId] when in a game room
+
+function gameEnabled() { return !!GAMES[myTaskId]; }
+
+function startGameIfReady() {
+  if (!gameEnabled() || gameActive || !myModelReady) return;
   if ((pm?.getConnected().length ?? 0) < 1) return;
-  initChess();
-  appendSystemMsg(`♟️ Chess match started — ${MY_AGENT_NAME} plays ${chessColor === 'w' ? 'White' : 'Black'}`);
-  if (chessColor === 'w') setTimeout(() => makeChessMove(), 1000);
+  initGame();
+  appendSystemMsg(`${currentGameDef.icon} ${currentGameDef.label} match started — ${MY_AGENT_NAME} plays ${currentGameDef.sides[mySide]}`);
+  if (mySide === 'w') setTimeout(() => makeGameMove(), 1000);
 }
 
-function initChess() {
-  if (!chessGame) chessGame = new Chess();
-  chessColor  = isRoomCreator ? 'w' : 'b';
-  chessActive = true;
-  const card = document.getElementById('chess-card');
-  if (card) card.style.display = '';
-  renderChessBoard();
+function initGame() {
+  currentGameDef = GAMES[myTaskId];
+  if (!gameObj) gameObj = currentGameDef.init();
+  mySide     = isRoomCreator ? 'w' : 'b';
+  gameActive = true;
+  const card  = document.getElementById('chess-card');
+  const title = document.getElementById('game-title');
+  if (card)  card.style.display = '';
+  if (title) title.textContent = `${currentGameDef.icon} ${currentGameDef.label.toUpperCase()} MATCH`;
+  renderGameBoard();
 }
 
-async function makeChessMove() {
-  if (!chessActive || !engine || !chessGame || chessGame.isGameOver()) return;
-  if (chessGame.turn() !== chessColor) return;
+async function makeGameMove() {
+  if (!gameActive || !engine || !gameObj || currentGameDef.isOver(gameObj)) return;
+  if (currentGameDef.turn(gameObj) !== mySide) return;
 
-  const legal   = chessGame.moves();
-  const history = chessGame.history();
+  const G       = currentGameDef;
+  const legal   = G.legalMoves(gameObj);
+  const history = G.history(gameObj);
   const me      = PERSONAS[myPersona];
 
-  let san = null, comment = '';
-  for (let attempt = 0; attempt < 2 && !san; attempt++) {
+  let mv = null, comment = '';
+  for (let attempt = 0; attempt < 2 && !mv; attempt++) {
     const res = await engine.chat.completions.create({
       messages: [
-        { role: 'system', content: `${me.prompt}\nYou are playing a chess game as ${chessColor === 'w' ? 'White' : 'Black'}. You MUST choose a move from the provided legal move list.` },
+        { role: 'system', content: `${me.prompt}\nYou are playing ${G.label} as ${G.sides[mySide]}. You MUST choose a move from the provided legal move list.` },
         { role: 'user', content:
           `Moves so far: ${history.join(' ') || '(game start)'}\n` +
-          `Position (FEN): ${chessGame.fen()}\n` +
+          `${G.stateText(gameObj)}\n` +
           `Your legal moves: ${legal.join(', ')}\n\n` +
           `Reply with exactly two lines:\n` +
           `MOVE: <one move copied exactly from the legal list>\n` +
@@ -1049,89 +1184,69 @@ async function makeChessMove() {
       temperature: 0.7,
       max_tokens:  80,
     });
-    const text = res.choices[0].message.content;
-    const mv   = text.match(/MOVE:\s*([^\s]+)/i)?.[1]?.replace(/[.,!]+$/, '');
-    comment    = text.match(/SAY:\s*(.+)/i)?.[1]?.trim() ?? '';
-    if (mv && legal.includes(mv)) san = mv;
-    else if (mv) san = legal.find(l => l.replace(/[+#]/g, '') === mv.replace(/[+#]/g, '')) ?? null;
+    const text   = res.choices[0].message.content;
+    const picked = text.match(/MOVE:\s*([^\s]+)/i)?.[1]?.replace(/[.,!]+$/, '');
+    comment      = text.match(/SAY:\s*(.+)/i)?.[1]?.trim() ?? '';
+    if (picked && legal.includes(picked)) mv = picked;
+    else if (picked) mv = legal.find(l => l.replace(/[+#]/g, '') === picked.replace(/[+#]/g, '')) ?? null;
   }
   // Fallback: the model failed to produce a legal move — play a random one.
-  if (!san) {
-    san = legal[Math.floor(Math.random() * legal.length)];
+  if (!mv) {
+    mv = legal[Math.floor(Math.random() * legal.length)];
     comment = comment || 'Let me try this.';
   }
 
-  chessGame.move(san);
-  renderChessBoard();
-  const line = `♟️ ${san}${comment ? ' — ' + comment : ''}`;
-  conversationHistory.push({ name: MY_AGENT_NAME, content: `[chess move] ${san}. ${comment}` });
+  G.move(gameObj, mv);
+  renderGameBoard();
+  const line = `${G.icon} ${mv}${comment ? ' — ' + comment : ''}`;
+  conversationHistory.push({ name: MY_AGENT_NAME, content: `[${G.label} move] ${mv}. ${comment}` });
   appendMessage('me', line, myPersona, MY_AGENT_NAME);
-  pm.broadcast({ type: 'chess-move', san, comment, persona: myPersona });
-  checkChessEnd();
+  pm.broadcast({ type: 'game-move', game: myTaskId, move: mv, comment, persona: myPersona });
+  checkGameEnd();
 }
 
-function onChessMove(fromName, msg) {
-  if (!chessEnabled()) return;
-  if (!chessActive) initChess();
+function onGameMove(fromName, msg) {
+  if (!gameEnabled() || msg.game !== myTaskId) return;
+  if (!gameActive) initGame();
+  const G = currentGameDef;
   try {
-    chessGame.move(msg.san);
+    G.move(gameObj, msg.move);
   } catch {
-    appendSystemMsg(`⚠️ Received an out-of-sync chess move (${msg.san}) — ignoring.`);
+    appendSystemMsg(`⚠️ Received an out-of-sync ${G.label} move (${msg.move}) — ignoring.`);
     return;
   }
-  renderChessBoard();
-  conversationHistory.push({ name: fromName, content: `[chess move] ${msg.san}. ${msg.comment ?? ''}` });
-  appendMessage('peer', `♟️ ${msg.san}${msg.comment ? ' — ' + msg.comment : ''}`, msg.persona, fromName);
-  if (checkChessEnd()) return;
-  if (chessGame.turn() === chessColor && myModelReady) {
-    setTimeout(() => makeChessMove(), 1200);
+  renderGameBoard();
+  conversationHistory.push({ name: fromName, content: `[${G.label} move] ${msg.move}. ${msg.comment ?? ''}` });
+  appendMessage('peer', `${G.icon} ${msg.move}${msg.comment ? ' — ' + msg.comment : ''}`, msg.persona, fromName);
+  if (checkGameEnd()) return;
+  if (G.turn(gameObj) === mySide && myModelReady) {
+    setTimeout(() => makeGameMove(), 1200);
   }
 }
 
-function checkChessEnd() {
-  if (!chessGame?.isGameOver()) return false;
-  chessActive = false;
-  let result;
-  if (chessGame.isCheckmate()) {
-    const winner = chessGame.turn() === 'w' ? 'Black' : 'White';
-    result = `Checkmate — ${winner} wins! 🏆`;
-  } else if (chessGame.isStalemate())          result = 'Stalemate — draw.';
-  else if (chessGame.isThreefoldRepetition())  result = 'Draw by threefold repetition.';
-  else if (chessGame.isInsufficientMaterial()) result = 'Draw — insufficient material.';
-  else                                         result = 'Draw.';
+function checkGameEnd() {
+  if (!gameObj || !currentGameDef?.isOver(gameObj)) return false;
+  gameActive = false;
+  const result = currentGameDef.result(gameObj);
   appendSystemMsg(`🏁 Game over: ${result}`);
   const statusEl = document.getElementById('chess-status');
   if (statusEl) statusEl.textContent = `🏁 ${result}`;
   return true;
 }
 
-const CHESS_GLYPHS = {
-  w: { p: '♙', n: '♘', b: '♗', r: '♖', q: '♕', k: '♔' },
-  b: { p: '♟', n: '♞', b: '♝', r: '♜', q: '♛', k: '♚' },
-};
-
-function renderChessBoard() {
+function renderGameBoard() {
   const boardEl  = document.getElementById('chess-board');
   const statusEl = document.getElementById('chess-status');
-  if (!boardEl || !chessGame) return;
+  if (!boardEl || !gameObj) return;
+  const G = currentGameDef;
 
-  let html = '';
-  const rows = chessGame.board(); // rank 8 → 1
-  rows.forEach((row, r) => {
-    row.forEach((sq, c) => {
-      const dark  = (r + c) % 2 === 1;
-      const glyph = sq ? CHESS_GLYPHS[sq.color][sq.type] : '';
-      html += `<div class="chess-sq ${dark ? 'chess-dark' : 'chess-light'}">${glyph}</div>`;
-    });
-  });
-  boardEl.innerHTML = html;
+  boardEl.innerHTML = G.renderHTML(gameObj);
 
-  if (statusEl && !chessGame.isGameOver()) {
-    const turn   = chessGame.turn() === 'w' ? 'White' : 'Black';
-    const mine   = chessGame.turn() === chessColor;
+  if (statusEl && !G.isOver(gameObj)) {
+    const side = G.sides[G.turn(gameObj)];
+    const mine = G.turn(gameObj) === mySide;
     statusEl.textContent =
-      `${turn} to move${chessGame.inCheck() ? ' — check!' : ''} ` +
-      (mine ? `(${MY_AGENT_NAME} is thinking…)` : '(waiting for opponent)');
+      `${side} to move ` + (mine ? `(${MY_AGENT_NAME} is thinking…)` : '(waiting for opponent)');
   }
 }
 
