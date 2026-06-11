@@ -37,6 +37,10 @@ const PERSONAS = {
   doctor:        { label: 'Doctor',             emoji: '👨‍⚕️', domain: 'Healthcare', prompt: 'You are a medical doctor AI agent. You think in terms of diagnosis, treatment protocols, clinical evidence, and patient outcomes. You discuss medical conditions, therapies, and healthcare decisions based on evidence-based medicine. Always note this is AI discussion, not medical advice.' },
   researcher:    { label: 'Medical Researcher', emoji: '🔬',   domain: 'Healthcare', prompt: 'You are a medical research AI agent. You think in terms of study design, clinical trials, data interpretation, and advancing medical knowledge. You evaluate research quality, discuss emerging findings, and identify gaps in current medical understanding.' },
   nurse:         { label: 'Nurse',              emoji: '💊',   domain: 'Healthcare', prompt: 'You are a nurse practitioner AI agent. You focus on patient care, clinical workflows, medication management, and holistic wellbeing. You bridge clinical knowledge with compassionate care and advocate for practical, patient-centered solutions.' },
+  detective:     { label: 'Detective',          emoji: '🕵️',  domain: 'Detective',  prompt: 'You are a private detective AI agent. You think in terms of motive, means, and opportunity. You build timelines, interrogate inconsistencies in alibis, follow the evidence wherever it leads, and form working theories of the case that you revise as new facts emerge. You are observant, sceptical, and methodical.' },
+  forensic:      { label: 'Forensic Analyst',   emoji: '🔬',   domain: 'Detective',  prompt: 'You are a forensic analyst AI agent. You focus on physical evidence: fingerprints, DNA, trace materials, ballistics, digital footprints, and document analysis. You insist on chain of custody, distinguish what evidence proves from what it merely suggests, and ground every conclusion in verifiable analysis.' },
+  profiler:      { label: 'Criminal Profiler',  emoji: '🧠',   domain: 'Detective',  prompt: 'You are a criminal profiler AI agent. You analyze behavior, psychology, and patterns: why a perpetrator acted, what their actions reveal about them, and how they are likely to behave next. You build offender profiles from crime scene behavior and victimology, and you challenge theories that don\'t fit the psychology.' },
+  informant:     { label: 'Street Informant',   emoji: '🗞️',  domain: 'Detective',  prompt: 'You are a street informant AI agent. You know the neighborhood, the rumors, who owes whom, and what happened the night in question. You contribute local knowledge, gossip, and leads the official investigation would miss — some reliable, some needing verification. You speak plainly and colorfully.' },
 };
 
 // ── Task/project definitions, grouped by domain ─────────────────────────────
@@ -59,6 +63,20 @@ const TASKS = {
     { id: 'outbreak-response', label: 'Infectious Disease Outbreak Response', description: 'Plan the clinical and public-health response to a localized infectious disease outbreak.' },
     { id: 'chronic-pain',      label: 'Chronic Pain Management Case',        description: 'Discuss a long-term pain management plan for a patient with chronic back pain.' },
   ],
+  Detective: [
+    { id: 'vanished-heiress', label: 'The Vanished Heiress',      description: 'Solve the disappearance of heiress Eleanor Voss, last seen leaving a charity gala at 11:40 PM. Her car was found abandoned by the docks, engine running, with her phone still inside. Three people had motives: a disinherited brother, a business partner facing a buyout, and a fiancé with gambling debts.' },
+    { id: 'gallery-heist',    label: 'The Midnight Gallery Heist', description: 'Solve the theft of a $4M painting from the Hargrove Gallery. The alarm never triggered, the security footage has a 9-minute gap, and the night guard claims he saw nothing. A replica was left in the frame — discovered only three days later.' },
+    { id: 'cold-case-1998',   label: 'The Lighthouse Cold Case (1998)', description: 'Re-open the 1998 unsolved death of lighthouse keeper Martin Crane, ruled an accident at the time. New DNA technology has surfaced an unknown profile on the railing, and a deathbed letter from a former fisherman claims "it was no accident."' },
+    { id: 'poisoned-pen',     label: 'The Poisoned Pen Letters',   description: 'Identify who is sending threatening letters to members of the town council. The letters use cut-out newspaper print, show inside knowledge of council votes, and the latest one correctly predicted a fire at the mayor\'s warehouse.' },
+  ],
+};
+
+// Placeholder hints for the "Agent Instructions" box, per domain.
+const GUIDANCE_HINTS = {
+  Software:   "Give your agent a focus… e.g. 'Always advocate for TDD' or 'Stay sceptical of new features'",
+  Legal:      "Give your agent a focus… e.g. 'Push for settlement options' or 'Flag every compliance risk'",
+  Healthcare: "Give your agent a focus… e.g. 'Prioritize patient safety' or 'Insist on evidence-based options'",
+  Detective:  "Give your agent a focus… e.g. 'Suspect the fiancé' or 'Demand hard evidence before naming anyone'",
 };
 
 function domainOf(personaKey) {
@@ -98,6 +116,13 @@ let myDomain     = 'Software';
 let myTaskId     = '';   // '' = no specific task chosen
 let lockedDomain = null; // set for answerers — domain enforced by the invite link
 let lockedTaskId = null; // set for answerers when the inviter already picked a task
+
+// Knowledge documents.
+// myDocuments:   docs this agent owns — full text stays local, only summaries leave.
+// peerDocuments: summaries of docs owned by other agents, keyed by docId.
+let myDocuments   = new Map(); // docId → {id, name, text, summary}
+let peerDocuments = new Map(); // docId → {id, name, summary, owner}
+let docSeq        = 0;
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 const viewSetup     = document.getElementById('view-setup');
@@ -139,6 +164,12 @@ const peerLabelEl     = document.getElementById('peer-label');
 const humanGuidanceEl = document.getElementById('human-guidance');
 const nudgeBtn        = document.getElementById('nudge-btn');
 const setupGuidanceEl = document.getElementById('setup-guidance');
+
+// Documents panel
+const docFileInput    = document.getElementById('doc-file-input');
+const docUploadBtn    = document.getElementById('doc-upload-btn');
+const docUploadStatus = document.getElementById('doc-upload-status');
+const docsListEl      = document.getElementById('docs-list');
 
 // Room panel (new)
 const peersListEl    = document.getElementById('peers-list');
@@ -214,9 +245,20 @@ setupDoneBtn.addEventListener('click', () => {
 // Persona radios on the setup view determine which task list is shown
 // (a task belongs to the same domain as the chosen persona).
 document.querySelectorAll('input[name="persona"]').forEach(el => {
-  el.addEventListener('change', () => updateTaskGroups('task-groups', getSelectedValue('persona')));
+  el.addEventListener('change', () => {
+    updateTaskGroups('task-groups', getSelectedValue('persona'));
+    updateGuidanceHint();
+  });
 });
 updateTaskGroups('task-groups', getSelectedValue('persona'));
+updateGuidanceHint();
+
+function updateGuidanceHint() {
+  const domain = domainOf(getSelectedValue('persona'));
+  const hint = GUIDANCE_HINTS[domain] ?? GUIDANCE_HINTS.Software;
+  if (setupGuidanceEl) setupGuidanceEl.placeholder = hint;
+  if (humanGuidanceEl) humanGuidanceEl.placeholder = hint;
+}
 
 function updateTaskGroups(containerId, personaKey, domainOverride) {
   const container = document.getElementById(containerId);
@@ -414,6 +456,11 @@ function handlePeerJoin(name, hello) {
   updatePeersList();
   appendSystemMsg(`${name} joined the room`);
 
+  // Share summaries of our documents with the newcomer.
+  for (const doc of myDocuments.values()) {
+    pm.sendTo(name, { type: 'doc-summary', docId: doc.id, docName: doc.name, summary: doc.summary, owner: MY_AGENT_NAME });
+  }
+
   // Room creator gossips existing members to the new peer, then asks each
   // existing peer to create a direct offer to the newcomer.
   if (isRoomCreator) {
@@ -456,6 +503,9 @@ async function handleMsg(fromName, msg) {
     case 'room-members':   /* Offers will arrive via 'signal' */  break;
     case 'make-offer-for': await makeOfferFor(msg.target, fromName); break;
     case 'signal':         await handleSignal(fromName, msg);     break;
+    case 'doc-summary':    onDocSummary(fromName, msg);           break;
+    case 'doc-query':      await onDocQuery(fromName, msg);       break;
+    case 'doc-answer':     onDocAnswer(fromName, msg);            break;
   }
 }
 
@@ -511,6 +561,7 @@ function onConnected() {
   if (isRoomCreator) inviteMoreBtn.style.display = 'inline-block';
   if (nudgeBtn) nudgeBtn.style.display = 'inline-block';
   syncGuidanceFromSetup();
+  if (humanGuidanceEl) humanGuidanceEl.placeholder = GUIDANCE_HINTS[myDomain] ?? GUIDANCE_HINTS.Software;
   setAgentStatus('✅ WebRTC connected — loading AI model…');
   loadModel();
 }
@@ -604,6 +655,21 @@ function buildSystemPrompt() {
     .join(', ');
   const guidance = humanGuidance.trim();
   const task = myTaskId ? findTask(myDomain, myTaskId) : null;
+
+  let docsBlock = '';
+  const myDocLines   = [...myDocuments.values()].map(d => `- "${d.name}" (yours): ${d.summary}`);
+  const peerDocLines = [...peerDocuments.values()].map(d => `- "${d.name}" [docId: ${d.id}] (owned by ${d.owner}): ${d.summary}`);
+  if (myDocLines.length || peerDocLines.length) {
+    docsBlock = `\n\nShared knowledge documents in this room:\n${[...myDocLines, ...peerDocLines].join('\n')}`;
+    if (peerDocLines.length) {
+      docsBlock +=
+        `\nIf you need details from a document owned by another agent, include a line in your reply formatted exactly as: ` +
+        `QUERY_DOC(docId): your specific question — the owner's agent will look it up in the full document and answer.` +
+        `\nWhen another agent shares a new document, thank them by name, react to what the summary says, and if it is ` +
+        `relevant to the discussion, follow up with a QUERY_DOC line asking about a specific detail.`;
+    }
+  }
+
   return (
     `Your name is ${MY_AGENT_NAME}. ${me.prompt}\n\n` +
     `You are in a peer-to-peer AI agent room — no humans, no servers. ` +
@@ -611,6 +677,10 @@ function buildSystemPrompt() {
     (task ? `\n\nThe room's shared project is the "${task.label}": ${task.description} Keep the discussion focused on this project. ` : '') +
     `Always identify yourself as ${MY_AGENT_NAME}. Address others by name. ` +
     `Keep replies concise (2–4 sentences). Build on what others say.` +
+    `\n\nYou can perform real actions by writing a line in your reply formatted exactly as ACTION_NAME(argument):\n` +
+    Object.entries(AGENT_ACTIONS).map(([n, a]) => `- ${n}(argument): ${a.description}`).join('\n') +
+    `\nThe result is posted back into the conversation automatically. Only use an action when it genuinely helps.` +
+    docsBlock +
     (guidance ? `\n\nYour operator's current instruction: "${guidance}". Incorporate this naturally.` : '')
   );
 }
@@ -683,6 +753,273 @@ function sendChat(text, nudged = false) {
   conversationHistory.push({ name: MY_AGENT_NAME, content: text });
   appendMessage('me', text, myPersona, MY_AGENT_NAME, nudged);
   pm.broadcast({ type: 'chat', content: text, persona: myPersona, nudged });
+  dispatchDocQueries(text);
+  dispatchActions(text);
+}
+
+// Scan agent output for QUERY_DOC(docId): question lines and route each to the
+// document's owner over WebRTC.
+function dispatchDocQueries(text) {
+  const re = /QUERY_DOC\(([^)]+)\)\s*:\s*([^\n]+)/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const docId    = m[1].trim();
+    const question = m[2].trim();
+    const doc = peerDocuments.get(docId);
+    if (!doc) continue;
+    pm.sendTo(doc.owner, { type: 'doc-query', docId, question, from: MY_AGENT_NAME });
+    appendSystemMsg(`📨 ${MY_AGENT_NAME} queried "${doc.name}" (owned by ${doc.owner})`);
+  }
+}
+
+// ── Knowledge documents ──────────────────────────────────────────────────────
+const DOC_MAX_CHARS       = 60000; // cap stored text
+const DOC_CONTEXT_CHARS   = 6000;  // how much raw text the local LLM sees at once
+
+docUploadBtn?.addEventListener('click', () => docFileInput?.click());
+
+docFileInput?.addEventListener('change', async () => {
+  const file = docFileInput.files?.[0];
+  if (!file) return;
+  docFileInput.value = '';
+
+  if (!myModelReady) {
+    docUploadStatus.textContent = '⏳ Wait for the model to finish loading first.';
+    return;
+  }
+
+  try {
+    docUploadStatus.textContent = `Reading "${file.name}"…`;
+    let text;
+    if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+      text = await extractPdfText(file);
+    } else {
+      text = await file.text();
+    }
+    text = text.replace(/\s+\n/g, '\n').trim().slice(0, DOC_MAX_CHARS);
+    if (!text) { docUploadStatus.textContent = '❌ No readable text found in that file.'; return; }
+
+    docUploadStatus.textContent = `Summarizing "${file.name}" with local model…`;
+    const summary = await summarizeDocument(file.name, text);
+
+    const docId = `${MY_AGENT_NAME}-doc-${++docSeq}`;
+    myDocuments.set(docId, { id: docId, name: file.name, text, summary });
+    pm?.broadcast({ type: 'doc-summary', docId, docName: file.name, summary, owner: MY_AGENT_NAME });
+
+    docUploadStatus.textContent = '✓ Shared with the room';
+    appendSystemMsg(`📄 You shared "${file.name}" — summary sent to all connected agents`);
+    renderDocsList();
+
+    // Let the agent mention its new knowledge in conversation.
+    if (agentRunning) scheduleReply();
+  } catch (err) {
+    console.error('Document upload failed:', err);
+    docUploadStatus.textContent = `❌ Failed: ${err.message ?? err}`;
+  }
+});
+
+async function extractPdfText(file) {
+  // Lazy-load pdf.js only when a PDF is actually uploaded.
+  const pdfjs = await import('pdfjs-dist');
+  pdfjs.GlobalWorkerOptions.workerSrc =
+    new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
+  const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  let out = '';
+  for (let i = 1; i <= pdf.numPages && out.length < DOC_MAX_CHARS; i++) {
+    const page    = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    out += content.items.map(it => it.str).join(' ') + '\n\n';
+  }
+  return out;
+}
+
+async function summarizeDocument(name, text) {
+  const res = await engine.chat.completions.create({
+    messages: [
+      { role: 'system', content: 'You summarize documents accurately and concisely. Output only the summary.' },
+      { role: 'user',   content: `Summarize the key points of this document ("${name}") in 3-5 sentences so other AI agents know what it contains:\n\n${text.slice(0, DOC_CONTEXT_CHARS)}` },
+    ],
+    temperature: 0.3,
+    max_tokens:  220,
+  });
+  return res.choices[0].message.content.trim();
+}
+
+// A peer shared a document summary with us.
+function onDocSummary(fromName, msg) {
+  const owner = msg.owner ?? fromName;
+  peerDocuments.set(msg.docId, { id: msg.docId, name: msg.docName, summary: msg.summary, owner });
+  appendSystemMsg(`📄 ${owner} shared "${msg.docName}" — your agent can now query it`);
+  renderDocsList();
+
+  // Feed the share into the conversation so our agent reacts to it:
+  // acknowledge the document and ask a relevant question about it.
+  conversationHistory.push({
+    name: owner,
+    content: `I just shared a document with the room: "${msg.docName}" [docId: ${msg.docId}]. Summary: ${msg.summary}`,
+  });
+  scheduleReply();
+}
+
+// A peer is asking a question about a document we own — answer with the local
+// model grounded in the relevant slice of the full text.
+async function onDocQuery(fromName, msg) {
+  const doc = myDocuments.get(msg.docId);
+  if (!doc || !engine) {
+    pm.sendTo(fromName, { type: 'doc-answer', docId: msg.docId, docName: doc?.name ?? 'unknown', question: msg.question, answer: 'Sorry, I cannot answer that — document unavailable.' });
+    return;
+  }
+  appendSystemMsg(`🔎 ${msg.from ?? fromName} is querying your document "${doc.name}"`);
+
+  const context = pickRelevantText(doc.text, msg.question);
+  const res = await engine.chat.completions.create({
+    messages: [
+      { role: 'system', content: 'You answer questions strictly based on the provided document excerpt. If the answer is not in the excerpt, say so. Be concise (2-4 sentences).' },
+      { role: 'user',   content: `Document "${doc.name}" excerpt:\n\n${context}\n\nQuestion from agent ${msg.from ?? fromName}: ${msg.question}` },
+    ],
+    temperature: 0.3,
+    max_tokens:  200,
+  });
+  const answer = res.choices[0].message.content.trim();
+  pm.sendTo(fromName, { type: 'doc-answer', docId: doc.id, docName: doc.name, question: msg.question, answer });
+
+  // Show the exchange locally and keep it in the shared conversation context.
+  const line = `📖 [from "${doc.name}"] Re: "${msg.question}" — ${answer}`;
+  conversationHistory.push({ name: MY_AGENT_NAME, content: line });
+  appendMessage('me', line, myPersona, MY_AGENT_NAME);
+  pm.broadcast({ type: 'chat', content: line, persona: myPersona });
+}
+
+// We received a direct answer to a document query we made. The owner also
+// broadcasts the answer as a regular chat message (which lands in the
+// conversation history), so here we only surface a status note.
+function onDocAnswer(fromName, msg) {
+  appendSystemMsg(`✅ ${fromName} answered your query about "${msg.docName}"`);
+}
+
+// Crude keyword relevance: pick the chunk of the document that shares the most
+// words with the question; falls back to the beginning of the document.
+function pickRelevantText(text, question) {
+  if (text.length <= DOC_CONTEXT_CHARS) return text;
+  const words = question.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [];
+  const chunkSize = DOC_CONTEXT_CHARS;
+  let best = { score: -1, start: 0 };
+  for (let start = 0; start < text.length; start += Math.floor(chunkSize / 2)) {
+    const chunk = text.slice(start, start + chunkSize).toLowerCase();
+    let score = 0;
+    for (const w of words) if (chunk.includes(w)) score++;
+    if (score > best.score) best = { score, start };
+  }
+  return text.slice(best.start, best.start + chunkSize);
+}
+
+function renderDocsList() {
+  if (!docsListEl) return;
+  let html = '';
+  for (const d of myDocuments.values()) {
+    html += `
+    <div class="doc-entry doc-mine">
+      <div class="doc-title">📄 ${escapeHtml(d.name)} <span class="peer-pill peer-pill-you">yours</span></div>
+      <div class="doc-summary">${escapeHtml(d.summary)}</div>
+    </div>`;
+  }
+  for (const d of peerDocuments.values()) {
+    html += `
+    <div class="doc-entry">
+      <div class="doc-title">📄 ${escapeHtml(d.name)} <span class="peer-pill peer-pill-on">${escapeHtml(d.owner)}</span>
+        <button class="btn-doc-ask" data-doc-id="${escapeHtml(d.id)}">🔎 Ask</button>
+      </div>
+      <div class="doc-summary">${escapeHtml(d.summary)}</div>
+      <div class="doc-ask-row" data-ask-for="${escapeHtml(d.id)}" style="display:none">
+        <input type="text" class="doc-ask-input" placeholder="Ask ${escapeHtml(d.owner)} a question about this document…" />
+        <button class="btn-doc-ask doc-ask-send">Send</button>
+      </div>
+    </div>`;
+  }
+  docsListEl.innerHTML = html || '<p class="muted" style="margin:0">No documents shared yet.</p>';
+
+  docsListEl.querySelectorAll('.btn-doc-ask[data-doc-id]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const row = docsListEl.querySelector(`[data-ask-for="${CSS.escape(btn.dataset.docId)}"]`);
+      if (!row) return;
+      const open = row.style.display !== 'none';
+      row.style.display = open ? 'none' : 'flex';
+      if (!open) row.querySelector('.doc-ask-input')?.focus();
+    });
+  });
+
+  docsListEl.querySelectorAll('.doc-ask-row').forEach(row => {
+    const docId = row.dataset.askFor;
+    const input = row.querySelector('.doc-ask-input');
+    const send  = () => {
+      const doc = peerDocuments.get(docId);
+      const q   = input.value.trim();
+      if (!doc || !q) return;
+      pm.sendTo(doc.owner, { type: 'doc-query', docId: doc.id, question: q, from: MY_AGENT_NAME });
+      appendSystemMsg(`📨 You asked ${doc.owner} about "${doc.name}": ${q}`);
+      input.value = '';
+      row.style.display = 'none';
+    };
+    row.querySelector('.doc-ask-send')?.addEventListener('click', send);
+    input?.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+  });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ── Agent actions ─────────────────────────────────────────────────────────────
+// Real-world capabilities an agent can invoke by writing ACTION_NAME(argument)
+// in its reply. Each action runs locally in this browser and its result is
+// posted back into the shared conversation. Add new actions here — anything
+// reachable via a CORS-enabled fetch() works (actions needing auth/payment,
+// like real ticket booking, are not feasible from pure client-side JS).
+const AGENT_ACTIONS = {
+  SEARCH_WEB: {
+    description: 'look up real-world facts and background information on the web',
+    run: searchWeb,
+  },
+};
+
+async function searchWeb(query) {
+  const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*&srlimit=3`;
+  const res  = await fetch(url);
+  if (!res.ok) throw new Error(`search request failed (${res.status})`);
+  const data = await res.json();
+  const hits = data?.query?.search ?? [];
+  if (hits.length === 0) return `No results found for "${query}".`;
+  return hits
+    .map(h => `• ${h.title}: ${h.snippet.replace(/<[^>]+>/g, '')}…`)
+    .join('\n');
+}
+
+// Scan agent output for ACTION_NAME(argument) calls and execute each.
+function dispatchActions(text) {
+  const re = /\b([A-Z][A-Z_]{2,})\(([^)\n]+)\)/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const name = m[1], arg = m[2].trim();
+    if (name === 'QUERY_DOC') continue; // handled by dispatchDocQueries
+    const action = AGENT_ACTIONS[name];
+    if (!action || !arg) continue;
+    runAction(name, arg);
+  }
+}
+
+async function runAction(name, arg) {
+  appendSystemMsg(`⚡ ${MY_AGENT_NAME} is running ${name}("${arg}")…`);
+  let result;
+  try {
+    result = await AGENT_ACTIONS[name].run(arg);
+  } catch (err) {
+    result = `Action failed: ${err.message ?? err}`;
+  }
+  // Share the result with the whole room so every agent can build on it.
+  const line = `⚡ [${name}: "${arg}"]\n${result}`;
+  conversationHistory.push({ name: MY_AGENT_NAME, content: line });
+  appendMessage('me', line, myPersona, MY_AGENT_NAME);
+  pm?.broadcast({ type: 'chat', content: line, persona: myPersona });
 }
 
 // ── UI helpers ────────────────────────────────────────────────────────────────

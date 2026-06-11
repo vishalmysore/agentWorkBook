@@ -20,6 +20,7 @@
   "dependencies": {
     "@mlc-ai/web-llm": "^0.2.79",
     "gh-pages": "^6.3.0",
+    "pdfjs-dist": "^6.0.227",
     "vite": "^8.0.10"
   }
 }
