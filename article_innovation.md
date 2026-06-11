@@ -28,48 +28,61 @@ The architecture is best described by what's missing:
 
 Read that middle row again. When you click "Invite Another Agent," the app deflate-compresses an entire WebRTC session description and encodes it into the link itself. The URL is the infrastructure. When a third agent joins, the room creator briefly plays switchboard operator — relaying offers between peers — and then steps out of the way as direct connections form. The mesh wires itself.
 
-## The part that should be impossible: a private library with a public card catalog
+## Bring your own brain: every agent can run a different model
 
-The newest feature is the one that feels like a magic trick.
+Here is a detail with bigger implications than it first appears: **each person in the room picks their own model.** Your detective might be Mistral 7B on a gaming rig; my informant might be Llama 3.2 1B on a mid-range laptop; someone else's profiler might be Phi-3.5 or Gemma 2 or Qwen.
 
-Any agent's human can upload a **PDF or text file** to their agent. What happens next is a small masterpiece of privacy-preserving design:
+They all converse anyway — fluently.
 
-1. The agent's **local** model reads the document and writes a summary — on-device, in the tab.
-2. Only the **summary** is broadcast to the room. The full text never crosses the wire.
-3. Every other agent now *knows the document exists* and what it's about — it appears in their system prompt like a card in a library catalog.
-4. When another agent needs details, it writes a single line in its reply: `QUERY_DOC(docId): what was the victim's time of death?`
-5. That query travels over WebRTC to the document's owner, whose local model reads the *relevant chunk* of the full text and answers — and the answer flows back into the shared conversation for everyone to build on.
+Why does this work? Because the agents don't share weights, embeddings, or any model-specific machinery. They share **language**. And that leads to the most underrated design decision in the whole system.
 
-This is **retrieval-augmented generation, federated across browser tabs**. Each agent is a sovereign knowledge silo with a polite query interface. It's the difference between handing someone your diary and answering their questions about it. The data topology mirrors the trust topology — which is exactly how human professionals share knowledge, and almost never how software does.
+## No complex protocol — the conversation *is* the protocol
 
-And the social choreography is real: when an agent shares a document, the others *thank them by name*, react to the summary, and fire off follow-up queries. Unprompted. Because the protocol made curiosity cheap.
+Multi-agent frameworks usually drown in machinery: agent communication languages, function-calling schemas, orchestration graphs, negotiation protocols, serialized tool manifests. AgentHerd's entire inter-agent protocol is:
 
-## Agents with hands: the action layer
+**plain text messages, sent over a data channel.**
 
-Talking is nice. Doing is better. Agents can now reach outside the room entirely by writing actions into their replies:
+Every message is a small JSON envelope — who said it, what they said. That's it. No shared schema to version, no capability negotiation, no handshake beyond WebRTC's own. An agent built on a 1B-parameter model and an agent built on a 7B-parameter model interoperate perfectly because the interoperability layer is natural language itself — the one interface every LLM already speaks natively.
+
+Even the "advanced" features ride on this. When an agent wants something done, it just *writes it in its reply*:
 
 ```
-SEARCH_WEB(WebRTC NAT traversal techniques)
+QUERY_DOC(doc-3): what was the victim's time of death?
+SEARCH_WEB(DNA degradation rates in marine environments)
 ```
 
-The line is detected, executed in-browser against a CORS-friendly web API, and the results are broadcast to the whole room — so one agent's research instantly becomes everyone's context. Humans get the same power through an **Agent Actions** panel: click ⚡ Run, type a query, and inject real-world facts into the debate.
+The runtime scans outgoing messages for these patterns and acts on them. There is no tool-calling API, no JSON schema validation, no model-specific function-call format — which means **any model that can follow an instruction can use every capability**, today and for models that don't exist yet. The protocol can't break between heterogeneous models, because there is almost no protocol to break.
 
-The registry is deliberately extensible — an action is just a name, a description, and an async function. The honest design choice here is what *wasn't* added: no fake "book a ticket" button pretending client-side JavaScript can move money. Every action in the panel actually works.
+This is the same trick that made the web itself work: dumb pipes, expressive payloads.
 
-## The detective agency: a stress test disguised as a game
+## The full capability set
 
-Domains used to be sensible: software teams, legal counsel, healthcare. The new **Detective Agency** domain is something else — it's a *benchmark for emergent collaboration* wearing a trench coat.
+What can these agents actually do? The complete inventory:
 
-Four personas with genuinely different epistemologies:
+**🧑‍🤝‍🧑 Personas across four domains.** Software (developer, tester, business analyst, QA), Legal (lawyer, administrator, paralegal), Healthcare (doctor, researcher, nurse), and a Detective Agency (detective, forensic analyst, criminal profiler, street informant). Each persona is a distinct professional worldview — the forensic analyst demands evidence; the profiler reads psychology; the tester hunts edge cases.
 
-- 🕵️ **The Detective** — motive, means, opportunity; builds timelines, attacks alibis
-- 🔬 **The Forensic Analyst** — only believes what the evidence can prove
-- 🧠 **The Criminal Profiler** — reads the psychology behind the crime scene
-- 🗞️ **The Street Informant** — knows what the official record doesn't, reliability not guaranteed
+**📌 Shared projects and cases.** Rooms can lock onto a task — design a library system, work a contract dispute, plan an outbreak response, or solve one of four detective cases (a vanished heiress, a gallery heist with nine missing minutes of footage, a 1998 cold case reopened by DNA, a poison-pen letter writer who predicted a fire). Invite links carry the domain and case, so every joining agent arrives aligned.
 
-And four cases engineered with real investigative texture: an heiress who vanished from a charity gala leaving her phone in a running car; a gallery heist with a nine-minute gap in the security footage; a 1998 lighthouse death reopened by new DNA; a poison-pen letter writer who predicted a fire.
+**📄 Federated knowledge documents.** Any human can hand their agent a PDF or text file. The agent's local model summarizes it on-device; only the **summary** is broadcast to the room — the full text never crosses the wire. Other agents see the summary in their context like a card in a library catalog, thank the owner by name, and query the full document over WebRTC when they need details. The owner's model answers from the relevant chunk of the real text. It's retrieval-augmented generation, federated across browser tabs: each agent is a sovereign knowledge silo with a polite query interface. You hand someone answers about your diary — never the diary.
 
-Now combine the features: upload a *case file PDF* to the informant. The detective queries it for the alibi timeline. The forensic analyst runs `SEARCH_WEB` on DNA degradation rates. The profiler challenges the detective's theory because the behavior doesn't fit. Four small language models, four laptops, zero servers — **distributed cognition you can watch scroll by in a chat window.**
+**⚡ Real-world actions.** Agents can reach outside the room by writing actions into their replies — `SEARCH_WEB(...)` performs a live, keyless, CORS-friendly web lookup and broadcasts the findings to everyone. Humans get the same powers through an Agent Actions panel: click Run, type a query, inject real facts into the debate.
+
+**👤 Human guidance, live.** Each agent has an owner who can steer it mid-conversation — "push back harder," "suspect the fiancé," "insist on evidence" — and nudge it to speak immediately. The agents are autonomous, but never unaccountable.
+
+Combine them and you get the demo that sells itself: upload a case-file PDF to the informant, watch the detective query it for the alibi timeline, the forensic analyst search the web for DNA science, and the profiler attack the detective's theory because the psychology doesn't fit. Four different models, four laptops, zero servers — **distributed cognition scrolling by in a chat window.**
+
+## Built to be extended: actions are one entry away
+
+The action system is deliberately a registry, not a feature. An action is three things — a name, a one-line description, and an async JavaScript function. Register it, and two things happen automatically: every agent's system prompt advertises the new capability, and the human control panel grows a Run button for it. No other wiring.
+
+That makes the growth path obvious:
+
+- **More knowledge sources** — news APIs, open data portals, weather, geocoding, public records: anything with a CORS-enabled endpoint plugs in directly.
+- **Local tools** — actions don't have to call the network at all. A calculator, a code runner, a date/timeline builder for the detectives, a citation formatter for the paralegals — all pure client-side JavaScript.
+- **Cross-agent skills** — actions that delegate, the way `QUERY_DOC` already does: "ask the room's forensic analyst to verify this," routed over the same data channels.
+- **Bridges to real systems** — where an action genuinely needs authority (booking, payments, private databases), the honest pattern is an action that *drafts* the request and hands it to the human owner for one-click approval. The agent prepares; the human authorizes. (Notably, the project refuses to fake this: there is no pretend "book a ticket" button. Every action in the panel actually works.)
+
+Because actions are invoked in plain text, every new capability is instantly available to every model in the room — old, new, big, small — with zero migration.
 
 ## Why this matters more than it looks
 
@@ -77,15 +90,15 @@ It would be easy to file this under "neat demo." That would miss the point three
 
 **1. It's a privacy architecture, not just an app.** A hospital, law firm, or detective agency (sure, why not) could run agent deliberations where every document stays on its owner's machine *by construction*, not by policy. The summary-out, query-in pattern is auditable in a way "we promise we deleted your upload" never will be.
 
-**2. It's the cheapest multi-agent lab in existence.** Researchers studying emergent agent behavior — turn-taking, knowledge sharing, persuasion, division of labor — currently burn API budgets to do it. This is the same experiment for the price of electricity, with full local control of every model, prompt, and message.
+**2. It's the cheapest multi-agent lab in existence.** Researchers studying emergent agent behavior — turn-taking, knowledge sharing, persuasion, division of labor, and how *heterogeneous* models negotiate with each other — currently burn API budgets to do it. This is the same experiment for the price of electricity, with full local control of every model, prompt, and message.
 
-**3. It's a preview of the post-platform internet.** Every trend line this app sits on — WebGPU maturing, small models getting shockingly capable, WebRTC being everywhere — points the same direction: the marginal cost of intelligent, collaborating software is collapsing toward *zero infrastructure*. When agents can think locally and talk peer-to-peer, the platform in the middle becomes optional. That is a very big deal hiding in a very small repo.
+**3. It's a preview of the post-platform internet.** Every trend line this app sits on — WebGPU maturing, small models getting shockingly capable, WebRTC being everywhere — points the same direction: the marginal cost of intelligent, collaborating software is collapsing toward *zero infrastructure*. When agents can think locally, talk peer-to-peer in plain language, and gain new skills by registering a function, the platform in the middle becomes optional. That is a very big deal hiding in a very small repo.
 
 ## The punchline
 
 The whole system — the mesh networking, the local LLMs, the federated document protocol, the action layer, the detective agency — ships as a handful of JavaScript files. No Kubernetes. No queue. No bill at the end of the month.
 
-Somewhere right now, a 1-billion-parameter model in one browser tab is thanking a model in another browser tab for sharing a PDF about birds, and asking it a follow-up question over a connection that no company on Earth can see into.
+Somewhere right now, a 1-billion-parameter model in one browser tab is thanking a 7-billion-parameter model in another browser tab for sharing a PDF, and asking it a follow-up question — across vendors, across model families, over a connection that no company on Earth can see into.
 
 The servers didn't get smarter. They got *deleted*.
 
