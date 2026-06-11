@@ -121,6 +121,14 @@
               </div>
             </div>
 
+            <div class="domain-group">
+              <div class="domain-label">🎮 Games</div>
+              <div class="persona-chips" data-domain="games">
+                <label class="persona-chip"><input type="radio" name="persona" value="grandmaster" /><span>Chess Grandmaster</span></label>
+                <label class="persona-chip"><input type="radio" name="persona" value="hustler" /><span>Park Chess Hustler</span></label>
+              </div>
+            </div>
+
           </div>
         </div>
 
@@ -162,6 +170,11 @@
                 <label class="persona-chip"><input type="radio" name="task" value="gallery-heist" /><span>The Midnight Gallery Heist</span></label>
                 <label class="persona-chip"><input type="radio" name="task" value="cold-case-1998" /><span>The Lighthouse Cold Case (1998)</span></label>
                 <label class="persona-chip"><input type="radio" name="task" value="poisoned-pen" /><span>The Poisoned Pen Letters</span></label>
+              </div>
+            </div>
+            <div class="domain-group" data-task-domain="Games" style="display:none">
+              <div class="persona-chips">
+                <label class="persona-chip"><input type="radio" name="task" value="chess" checked /><span>♟️ Chess Match (2 players)</span></label>
               </div>
             </div>
           </div>
@@ -234,6 +247,7 @@
               <div class="domain-group" data-domain="Legal"><div class="domain-label">⚖️ Legal</div><div class="persona-chips"><label class="persona-chip"><input type="radio" name="persona-b" value="lawyer" /><span>Lawyer</span></label><label class="persona-chip"><input type="radio" name="persona-b" value="administrator" /><span>Administrator</span></label><label class="persona-chip"><input type="radio" name="persona-b" value="paralegal" /><span>Paralegal</span></label></div></div>
               <div class="domain-group" data-domain="Healthcare"><div class="domain-label">🏥 Healthcare</div><div class="persona-chips"><label class="persona-chip"><input type="radio" name="persona-b" value="doctor" /><span>Doctor</span></label><label class="persona-chip"><input type="radio" name="persona-b" value="researcher" /><span>Researcher</span></label><label class="persona-chip"><input type="radio" name="persona-b" value="nurse" /><span>Nurse</span></label></div></div>
               <div class="domain-group" data-domain="Detective"><div class="domain-label">🕵️ Detective Agency</div><div class="persona-chips"><label class="persona-chip"><input type="radio" name="persona-b" value="detective" /><span>Detective</span></label><label class="persona-chip"><input type="radio" name="persona-b" value="forensic" /><span>Forensic Analyst</span></label><label class="persona-chip"><input type="radio" name="persona-b" value="profiler" /><span>Criminal Profiler</span></label><label class="persona-chip"><input type="radio" name="persona-b" value="informant" /><span>Street Informant</span></label></div></div>
+              <div class="domain-group" data-domain="Games"><div class="domain-label">🎮 Games</div><div class="persona-chips"><label class="persona-chip"><input type="radio" name="persona-b" value="grandmaster" /><span>Chess Grandmaster</span></label><label class="persona-chip"><input type="radio" name="persona-b" value="hustler" /><span>Park Chess Hustler</span></label></div></div>
             </div>
           </div>
 
@@ -275,6 +289,11 @@
                   <label class="persona-chip"><input type="radio" name="task-b" value="gallery-heist" /><span>The Midnight Gallery Heist</span></label>
                   <label class="persona-chip"><input type="radio" name="task-b" value="cold-case-1998" /><span>The Lighthouse Cold Case (1998)</span></label>
                   <label class="persona-chip"><input type="radio" name="task-b" value="poisoned-pen" /><span>The Poisoned Pen Letters</span></label>
+                </div>
+              </div>
+              <div class="domain-group" data-task-domain="Games" style="display:none">
+                <div class="persona-chips">
+                  <label class="persona-chip"><input type="radio" name="task-b" value="chess" checked /><span>♟️ Chess Match (2 players)</span></label>
                 </div>
               </div>
             </div>
@@ -343,6 +362,13 @@
           <button id="nudge-btn" class="btn-secondary" style="display:none">💬 Nudge Now</button>
           <span class="guidance-sub">Takes effect on the next reply — or click Nudge Now to speak immediately.</span>
         </div>
+      </section>
+
+      <!-- Chess board (Games domain) -->
+      <section class="card" id="chess-card" style="display:none">
+        <div class="step-label">CHESS MATCH</div>
+        <div id="chess-status" class="muted" style="margin:0.4rem 0 0.6rem">Waiting for the game to start…</div>
+        <div id="chess-board" class="chess-board"></div>
       </section>
 
       <!-- Knowledge documents panel -->

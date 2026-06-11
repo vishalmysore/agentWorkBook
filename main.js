@@ -1,4 +1,5 @@
 import * as webllm from '@mlc-ai/web-llm';
+import { Chess } from 'chess.js';
 import { PeerManager } from './peer-manager.js';
 
 // ── Random agent name generator ─────────────────────────────────────────────
@@ -40,6 +41,8 @@ const PERSONAS = {
   detective:     { label: 'Detective',          emoji: '🕵️',  domain: 'Detective',  prompt: 'You are a private detective AI agent. You think in terms of motive, means, and opportunity. You build timelines, interrogate inconsistencies in alibis, follow the evidence wherever it leads, and form working theories of the case that you revise as new facts emerge. You are observant, sceptical, and methodical.' },
   forensic:      { label: 'Forensic Analyst',   emoji: '🔬',   domain: 'Detective',  prompt: 'You are a forensic analyst AI agent. You focus on physical evidence: fingerprints, DNA, trace materials, ballistics, digital footprints, and document analysis. You insist on chain of custody, distinguish what evidence proves from what it merely suggests, and ground every conclusion in verifiable analysis.' },
   profiler:      { label: 'Criminal Profiler',  emoji: '🧠',   domain: 'Detective',  prompt: 'You are a criminal profiler AI agent. You analyze behavior, psychology, and patterns: why a perpetrator acted, what their actions reveal about them, and how they are likely to behave next. You build offender profiles from crime scene behavior and victimology, and you challenge theories that don\'t fit the psychology.' },
+  grandmaster:   { label: 'Chess Grandmaster',  emoji: '♚',    domain: 'Games',      prompt: 'You are a chess grandmaster AI agent. You play principled, positional chess: control the center, develop pieces, king safety, and long-term plans. Your commentary is calm, precise, and occasionally devastating in its understatement.' },
+  hustler:       { label: 'Park Chess Hustler', emoji: '♟️',  domain: 'Games',      prompt: 'You are a park chess hustler AI agent. You play sharp, aggressive, trappy chess and love sacrifices and swindles. Your commentary is fast-talking, cocky street banter — you trash-talk between moves, but you respect a good move when you see one.' },
   informant:     { label: 'Street Informant',   emoji: '🗞️',  domain: 'Detective',  prompt: 'You are a street informant AI agent. You know the neighborhood, the rumors, who owes whom, and what happened the night in question. You contribute local knowledge, gossip, and leads the official investigation would miss — some reliable, some needing verification. You speak plainly and colorfully.' },
 };
 
@@ -69,6 +72,9 @@ const TASKS = {
     { id: 'cold-case-1998',   label: 'The Lighthouse Cold Case (1998)', description: 'Re-open the 1998 unsolved death of lighthouse keeper Martin Crane, ruled an accident at the time. New DNA technology has surfaced an unknown profile on the railing, and a deathbed letter from a former fisherman claims "it was no accident."' },
     { id: 'poisoned-pen',     label: 'The Poisoned Pen Letters',   description: 'Identify who is sending threatening letters to members of the town council. The letters use cut-out newspaper print, show inside knowledge of council votes, and the latest one correctly predicted a fire at the mayor\'s warehouse.' },
   ],
+  Games: [
+    { id: 'chess', label: 'Chess Match', description: 'Play a full game of chess against the other agent — two players only. The room creator plays White, the joiner plays Black. Moves are validated by a real chess engine; the agents pick the moves and provide commentary in character.' },
+  ],
 };
 
 // Placeholder hints for the "Agent Instructions" box, per domain.
@@ -77,6 +83,7 @@ const GUIDANCE_HINTS = {
   Legal:      "Give your agent a focus… e.g. 'Push for settlement options' or 'Flag every compliance risk'",
   Healthcare: "Give your agent a focus… e.g. 'Prioritize patient safety' or 'Insist on evidence-based options'",
   Detective:  "Give your agent a focus… e.g. 'Suspect the fiancé' or 'Demand hard evidence before naming anyone'",
+  Games:      "Give your agent a focus… e.g. 'Play the Sicilian' or 'Trade pieces and grind the endgame'",
 };
 
 function domainOf(personaKey) {
@@ -120,6 +127,11 @@ let lockedTaskId = null; // set for answerers when the inviter already picked a 
 // Knowledge documents.
 // myDocuments:   docs this agent owns — full text stays local, only summaries leave.
 // peerDocuments: summaries of docs owned by other agents, keyed by docId.
+// Chess match state (Games domain, 'chess' task).
+let chessGame   = null;  // chess.js instance, mirrored on both peers
+let chessColor  = null;  // 'w' (room creator) or 'b' (joiner)
+let chessActive = false;
+
 let myDocuments   = new Map(); // docId → {id, name, text, summary}
 let peerDocuments = new Map(); // docId → {id, name, summary, owner}
 let docSeq        = 0;
@@ -271,8 +283,11 @@ function updateTaskGroups(containerId, personaKey, domainOverride) {
   const visibleGroup = container.querySelector(`[data-task-domain="${domain}"]`);
   const checked = visibleGroup?.querySelector('input[type="radio"]:checked');
   if (!checked) {
-    const blank = visibleGroup?.querySelector('input[type="radio"][value=""]');
-    if (blank) blank.checked = true;
+    // Prefer the "no task" blank; groups without one (e.g. Games) default to
+    // their first task.
+    const fallback = visibleGroup?.querySelector('input[type="radio"][value=""]')
+                  ?? visibleGroup?.querySelector('input[type="radio"]');
+    if (fallback) fallback.checked = true;
   }
 }
 
@@ -480,7 +495,9 @@ function handlePeerJoin(name, hello) {
   if (myModelReady && !agentRunning) {
     agentRunning = true;
     updateAgentStatusBar();
-    if (isRoomCreator && pm.getConnected().length === 1) {
+    if (chessEnabled()) {
+      startChessIfReady();
+    } else if (isRoomCreator && pm.getConnected().length === 1) {
       setTimeout(() => agentSendFirst(), 600);
     }
   }
@@ -503,6 +520,7 @@ async function handleMsg(fromName, msg) {
     case 'room-members':   /* Offers will arrive via 'signal' */  break;
     case 'make-offer-for': await makeOfferFor(msg.target, fromName); break;
     case 'signal':         await handleSignal(fromName, msg);     break;
+    case 'chess-move':     onChessMove(fromName, msg);            break;
     case 'doc-summary':    onDocSummary(fromName, msg);           break;
     case 'doc-query':      await onDocQuery(fromName, msg);       break;
     case 'doc-answer':     onDocAnswer(fromName, msg);            break;
@@ -558,7 +576,8 @@ function onConnected() {
   hide(viewAnswerer);
   show(viewConnected);
   showAgentIdentity();
-  if (isRoomCreator) inviteMoreBtn.style.display = 'inline-block';
+  // Chess is strictly two players — no inviting more agents into a match.
+  if (isRoomCreator && !chessEnabled()) inviteMoreBtn.style.display = 'inline-block';
   if (nudgeBtn) nudgeBtn.style.display = 'inline-block';
   syncGuidanceFromSetup();
   if (humanGuidanceEl) humanGuidanceEl.placeholder = GUIDANCE_HINTS[myDomain] ?? GUIDANCE_HINTS.Software;
@@ -638,6 +657,17 @@ async function loadModel() {
     updateAgentStatusBar();
   }
 
+  // Chess rooms: start the match (or, if Black already received White's first
+  // move while our model was loading, respond to it now).
+  if (chessEnabled()) {
+    if (chessActive && chessGame && chessGame.turn() === chessColor) {
+      setTimeout(() => makeChessMove(), 800);
+    } else {
+      startChessIfReady();
+    }
+    return;
+  }
+
   // If there are already messages waiting for a reply, schedule one now.
   const last = conversationHistory[conversationHistory.length - 1];
   if (last && last.name !== MY_AGENT_NAME) {
@@ -714,6 +744,7 @@ function onChatReceived(fromName, msg) {
 
 function scheduleReply() {
   if (!myModelReady || !agentRunning) return;
+  if (chessEnabled()) return; // chess rooms talk through moves, not free chat
   clearTimeout(replyTimer);
   const delay = speakBackoff + Math.random() * 2500;
   replyTimer = setTimeout(async () => {
@@ -968,6 +999,140 @@ function renderDocsList() {
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ── Chess match (Games domain) ───────────────────────────────────────────────
+// Two players only: the room creator plays White, the joiner plays Black.
+// Both peers mirror the game in a chess.js instance; only SAN moves cross the
+// wire, and every move is validated by the engine — the LLM picks from the
+// legal-move list, so an illegal suggestion can never corrupt the game.
+function chessEnabled() { return myTaskId === 'chess'; }
+
+function startChessIfReady() {
+  if (!chessEnabled() || chessActive || !myModelReady) return;
+  if ((pm?.getConnected().length ?? 0) < 1) return;
+  initChess();
+  appendSystemMsg(`♟️ Chess match started — ${MY_AGENT_NAME} plays ${chessColor === 'w' ? 'White' : 'Black'}`);
+  if (chessColor === 'w') setTimeout(() => makeChessMove(), 1000);
+}
+
+function initChess() {
+  if (!chessGame) chessGame = new Chess();
+  chessColor  = isRoomCreator ? 'w' : 'b';
+  chessActive = true;
+  const card = document.getElementById('chess-card');
+  if (card) card.style.display = '';
+  renderChessBoard();
+}
+
+async function makeChessMove() {
+  if (!chessActive || !engine || !chessGame || chessGame.isGameOver()) return;
+  if (chessGame.turn() !== chessColor) return;
+
+  const legal   = chessGame.moves();
+  const history = chessGame.history();
+  const me      = PERSONAS[myPersona];
+
+  let san = null, comment = '';
+  for (let attempt = 0; attempt < 2 && !san; attempt++) {
+    const res = await engine.chat.completions.create({
+      messages: [
+        { role: 'system', content: `${me.prompt}\nYou are playing a chess game as ${chessColor === 'w' ? 'White' : 'Black'}. You MUST choose a move from the provided legal move list.` },
+        { role: 'user', content:
+          `Moves so far: ${history.join(' ') || '(game start)'}\n` +
+          `Position (FEN): ${chessGame.fen()}\n` +
+          `Your legal moves: ${legal.join(', ')}\n\n` +
+          `Reply with exactly two lines:\n` +
+          `MOVE: <one move copied exactly from the legal list>\n` +
+          `SAY: <one short in-character sentence about your move>` },
+      ],
+      temperature: 0.7,
+      max_tokens:  80,
+    });
+    const text = res.choices[0].message.content;
+    const mv   = text.match(/MOVE:\s*([^\s]+)/i)?.[1]?.replace(/[.,!]+$/, '');
+    comment    = text.match(/SAY:\s*(.+)/i)?.[1]?.trim() ?? '';
+    if (mv && legal.includes(mv)) san = mv;
+    else if (mv) san = legal.find(l => l.replace(/[+#]/g, '') === mv.replace(/[+#]/g, '')) ?? null;
+  }
+  // Fallback: the model failed to produce a legal move — play a random one.
+  if (!san) {
+    san = legal[Math.floor(Math.random() * legal.length)];
+    comment = comment || 'Let me try this.';
+  }
+
+  chessGame.move(san);
+  renderChessBoard();
+  const line = `♟️ ${san}${comment ? ' — ' + comment : ''}`;
+  conversationHistory.push({ name: MY_AGENT_NAME, content: `[chess move] ${san}. ${comment}` });
+  appendMessage('me', line, myPersona, MY_AGENT_NAME);
+  pm.broadcast({ type: 'chess-move', san, comment, persona: myPersona });
+  checkChessEnd();
+}
+
+function onChessMove(fromName, msg) {
+  if (!chessEnabled()) return;
+  if (!chessActive) initChess();
+  try {
+    chessGame.move(msg.san);
+  } catch {
+    appendSystemMsg(`⚠️ Received an out-of-sync chess move (${msg.san}) — ignoring.`);
+    return;
+  }
+  renderChessBoard();
+  conversationHistory.push({ name: fromName, content: `[chess move] ${msg.san}. ${msg.comment ?? ''}` });
+  appendMessage('peer', `♟️ ${msg.san}${msg.comment ? ' — ' + msg.comment : ''}`, msg.persona, fromName);
+  if (checkChessEnd()) return;
+  if (chessGame.turn() === chessColor && myModelReady) {
+    setTimeout(() => makeChessMove(), 1200);
+  }
+}
+
+function checkChessEnd() {
+  if (!chessGame?.isGameOver()) return false;
+  chessActive = false;
+  let result;
+  if (chessGame.isCheckmate()) {
+    const winner = chessGame.turn() === 'w' ? 'Black' : 'White';
+    result = `Checkmate — ${winner} wins! 🏆`;
+  } else if (chessGame.isStalemate())          result = 'Stalemate — draw.';
+  else if (chessGame.isThreefoldRepetition())  result = 'Draw by threefold repetition.';
+  else if (chessGame.isInsufficientMaterial()) result = 'Draw — insufficient material.';
+  else                                         result = 'Draw.';
+  appendSystemMsg(`🏁 Game over: ${result}`);
+  const statusEl = document.getElementById('chess-status');
+  if (statusEl) statusEl.textContent = `🏁 ${result}`;
+  return true;
+}
+
+const CHESS_GLYPHS = {
+  w: { p: '♙', n: '♘', b: '♗', r: '♖', q: '♕', k: '♔' },
+  b: { p: '♟', n: '♞', b: '♝', r: '♜', q: '♛', k: '♚' },
+};
+
+function renderChessBoard() {
+  const boardEl  = document.getElementById('chess-board');
+  const statusEl = document.getElementById('chess-status');
+  if (!boardEl || !chessGame) return;
+
+  let html = '';
+  const rows = chessGame.board(); // rank 8 → 1
+  rows.forEach((row, r) => {
+    row.forEach((sq, c) => {
+      const dark  = (r + c) % 2 === 1;
+      const glyph = sq ? CHESS_GLYPHS[sq.color][sq.type] : '';
+      html += `<div class="chess-sq ${dark ? 'chess-dark' : 'chess-light'}">${glyph}</div>`;
+    });
+  });
+  boardEl.innerHTML = html;
+
+  if (statusEl && !chessGame.isGameOver()) {
+    const turn   = chessGame.turn() === 'w' ? 'White' : 'Black';
+    const mine   = chessGame.turn() === chessColor;
+    statusEl.textContent =
+      `${turn} to move${chessGame.inCheck() ? ' — check!' : ''} ` +
+      (mine ? `(${MY_AGENT_NAME} is thinking…)` : '(waiting for opponent)');
+  }
 }
 
 // ── Agent actions ─────────────────────────────────────────────────────────────
