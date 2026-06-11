@@ -562,6 +562,7 @@ function onConnected() {
   if (nudgeBtn) nudgeBtn.style.display = 'inline-block';
   syncGuidanceFromSetup();
   if (humanGuidanceEl) humanGuidanceEl.placeholder = GUIDANCE_HINTS[myDomain] ?? GUIDANCE_HINTS.Software;
+  renderActionsList();
   setAgentStatus('✅ WebRTC connected — loading AI model…');
   loadModel();
 }
@@ -977,10 +978,54 @@ function escapeHtml(s) {
 // like real ticket booking, are not feasible from pure client-side JS).
 const AGENT_ACTIONS = {
   SEARCH_WEB: {
+    emoji: '🌐',
+    label: 'Search Web',
+    placeholder: 'e.g. WebRTC NAT traversal, 1998 lighthouse accidents…',
     description: 'look up real-world facts and background information on the web',
     run: searchWeb,
   },
 };
+
+// Render the manual actions panel: one row per action with a toggleable input.
+function renderActionsList() {
+  const listEl = document.getElementById('actions-list');
+  if (!listEl) return;
+  listEl.innerHTML = Object.entries(AGENT_ACTIONS).map(([name, a]) => `
+    <div class="doc-entry">
+      <div class="doc-title">${a.emoji} ${a.label}
+        <button class="btn-doc-ask" data-action-name="${name}">⚡ Run</button>
+      </div>
+      <div class="doc-summary">Agents can ${a.description}.</div>
+      <div class="doc-ask-row" data-action-row="${name}" style="display:none">
+        <input type="text" class="doc-ask-input" placeholder="${a.placeholder ?? ''}" />
+        <button class="btn-doc-ask doc-action-send">Go</button>
+      </div>
+    </div>`).join('');
+
+  listEl.querySelectorAll('[data-action-name]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const row = listEl.querySelector(`[data-action-row="${btn.dataset.actionName}"]`);
+      if (!row) return;
+      const open = row.style.display !== 'none';
+      row.style.display = open ? 'none' : 'flex';
+      if (!open) row.querySelector('.doc-ask-input')?.focus();
+    });
+  });
+
+  listEl.querySelectorAll('[data-action-row]').forEach(row => {
+    const name  = row.dataset.actionRow;
+    const input = row.querySelector('.doc-ask-input');
+    const go = () => {
+      const arg = input.value.trim();
+      if (!arg) return;
+      input.value = '';
+      row.style.display = 'none';
+      runAction(name, arg);
+    };
+    row.querySelector('.doc-action-send')?.addEventListener('click', go);
+    input?.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  });
+}
 
 async function searchWeb(query) {
   const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*&srlimit=3`;
@@ -1140,6 +1185,8 @@ function setModelStatus(text, state) {
 function setAgentStatus(text) { agentStatusEl.textContent = text; }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
+renderActionsList();
+
 const nameBanner = document.getElementById('my-name-banner');
 if (nameBanner) nameBanner.textContent = MY_AGENT_NAME;
 
